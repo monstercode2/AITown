@@ -1,0 +1,166 @@
+# AI Town 开发顺序
+
+## 技术栈 [已完成]
+- [x] 前端框架：Next.js 14 + React 18 + TypeScript
+- [x] 状态管理：Zustand
+- [x] UI组件：Tailwind CSS
+- [x] 实时通信：Socket.IO
+- [x] AI服务：阿里百炼(qwen-plus), Gemini
+- [x] 开发工具：ESLint + Prettier
+
+## 1. 核心数据结构 [已完成]
+- [x] src/types/grid.ts - 地图格子类型定义
+- [x] src/types/agent.ts - Agent类型定义
+- [x] src/types/event.ts - 事件类型定义
+- [x] src/types/index.ts - 类型定义导出
+
+## 2. 基础组件开发
+### 2.1 地图系统 [已完成]
+- [x] src/components/Grid/
+  - [x] GridContainer.tsx - 地图容器组件
+  - [x] Tile.tsx - 单个格子组件
+  - [x] constants.ts - 地图相关常量
+  - [x] hooks/useGrid.ts - 地图状态管理Hook
+
+### 2.2 Agent系统 [已完成]
+- [x] src/components/Agent/
+  - [x] AgentSprite.tsx - Agent显示组件
+  - [x] AgentInfo.tsx - Agent信息展示组件
+  - [x] AgentStatus.tsx - Agent状态指示器
+  - [x] hooks/useAgent.ts - Agent状态管理Hook
+
+### 2.3 事件系统 [已完成]
+- [x] src/components/Event/
+  - [x] EventLog.tsx - 事件日志组件
+  - [x] EventNotification.tsx - 事件通知组件
+  - [x] hooks/useEvents.ts - 事件状态管理Hook
+
+### 2.4 UI组件 [进行中]
+- [ ] src/components/UI/
+  - [x] Layout.tsx - 页面布局组件
+  - [-] Sidebar.tsx - 侧边栏组件 [基础UI完成，功能待实现]
+  - [x] Controls.tsx - 控制面板组件
+  - [x] TimeDisplay.tsx - 时间显示组件
+
+## 3. 状态管理 [已完成]
+- [x] src/store/gridStore.ts - 地图状态管理
+- [x] src/store/agentStore.ts - Agent状态管理
+- [x] src/store/eventStore.ts - 事件状态管理
+- [x] src/store/timeStore.ts - 时间系统状态管理
+- [x] src/store/memoryStore.ts - Agent记忆系统状态管理
+
+## 4. 核心逻辑实现
+### 4.1 Agent行为系统 [已完成]
+- [x] src/systems/agent/movement.ts - 移动系统
+  - [x] 基础移动逻辑
+  - [x] 碰撞检测
+  - [x] 网格范围检查
+- [x] src/systems/agent/decision.ts - 决策系统
+  - [x] 行为类型定义
+  - [x] 环境感知接口
+  - [x] LLM响应解析
+  - [x] 决策执行器
+- [x] src/systems/agent/interaction.ts - 交互系统
+  - [x] Agent间对话
+  - [x] 基础交互
+  - [x] 环境交互
+- [x] src/systems/agent/memory.ts - 记忆系统
+  - [x] 短期记忆
+  - [x] 长期记忆
+  - [x] 记忆检索
+  - [x] 记忆影响决策
+
+### 4.2 LLM集成 [已完成]
+- [x] src/lib/llm/config.ts - LLM配置
+- [x] src/lib/llm/client/ - LLM客户端
+  - [x] dashscope.ts - 阿里百炼API客户端
+  - [x] gemini.ts - Gemini API客户端
+- [x] src/lib/llm/prompts/ - 提示词模板
+  - [x] agent-decision.ts - Agent决策提示词
+  - [x] agent-interaction.ts - Agent交互提示词
+  - [x] event-generation.ts - 事件生成提示词
+- [x] src/lib/llm/parser.ts - 响应解析器
+
+### 4.3 事件生成系统 [已完成]
+- [x] src/systems/event/
+  - [x] generator.ts - 事件生成器
+  - [x] processor.ts - 事件处理器
+  - [x] impact.ts - 影响计算器
+
+### 4.4 实时更新系统 [已完成]
+- [x] src/lib/socket/
+  - [x] client.ts - Socket.IO客户端
+  - [x] events.ts - 事件类型定义
+  - [x] handlers.ts - 事件处理器
+
+### 4.5 MVP核心系统 [进行中]
+- [ ] src/systems/main.ts - 主循环系统
+  - [ ] 实现Agent决策循环
+  - [ ] 环境状态管理
+  - [ ] LLM调用集成
+  - [ ] 错误处理机制
+- [ ] src/pages/api/ - API路由
+  - [ ] simulation.ts - 模拟控制API
+  - [ ] agents.ts - Agent管理API
+  - [ ] events.ts - 事件管理API
+- [ ] src/components/UI/ - 控制界面
+  - [ ] Controls.tsx - 模拟控制组件更新
+  - [ ] AgentList.tsx - Agent列表组件
+  - [ ] EventLog.tsx - 事件日志组件优化
+
+## 5. 页面实现 [进行中]
+- [x] src/pages/index.tsx - 主页面
+- [-] src/pages/api/ - API路由 [进行中]
+  - [-] socket.ts - WebSocket处理
+  - [-] events.ts - 事件API
+  - [-] agents.ts - Agent API
+  - [-] llm/ - LLM API路由
+    - [-] dashscope.ts - 阿里百炼API路由
+    - [-] gemini.ts - Gemini API路由
+
+## 6. 工具和辅助功能 [未开始]
+- [ ] src/utils/
+  - [ ] pathfinding.ts - 寻路算法
+  - [ ] random.ts - 随机数生成
+  - [ ] time.ts - 时间处理
+  - [ ] logger.ts - 日志系统
+
+## 7. 测试 [未开始]
+- [ ] src/__tests__/
+  - [ ] components/ - 组件测试
+  - [ ] systems/ - 系统测试
+  - [ ] utils/ - 工具函数测试
+
+## 8. 文档 [未开始]
+- [ ] docs/
+  - [ ] API.md - API文档
+  - [ ] ARCHITECTURE.md - 架构文档
+  - [ ] DEVELOPMENT.md - 开发指南
+
+## 开发优先级
+1. [x] 基础地图渲染 (2.1)
+2. [x] Agent基础显示 (2.2)
+3. [x] 简单的Agent移动系统 (4.1)
+4. [x] Agent决策系统 (4.1)
+5. [x] Agent交互系统 (4.1)
+6. [x] 事件系统 (4.2, 4.3)
+7. [x] Agent记忆系统 (4.1)
+8. [-] 完整UI界面 (2.4) [进行中]
+9. [-] API路由实现 (5) [进行中]
+10. [ ] MVP核心系统实现 (4.5)
+    1. [ ] 主循环系统
+    2. [ ] API路由
+    3. [ ] 控制界面
+    4. [ ] 基本功能测试
+
+## 注意事项
+1. 每个组件和功能模块都要考虑可扩展性
+2. 优先实现核心功能，其他功能可以后续迭代
+3. 保持代码简洁，添加必要的注释
+4. 定期进行代码审查和重构
+5. LLM API调用需要做好错误处理和重试机制
+6. 保护好各个LLM服务的API密钥
+7. 阿里百炼API使用qwen-plus模型，用于Agent决策和事件生成
+8. Agent决策系统需要考虑性能优化，避免过多的LLM调用
+9. 记忆系统要考虑存储效率和检索速度
+10. 交互系统要注意并发处理
