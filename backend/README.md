@@ -33,44 +33,58 @@ backend/
 pip install -r requirements.txt
 ```
 
-## 目录与文件详细说明
+## 文件与模块详细说明（2025年4月最新）
+
+### config.py
+- **作用**：全局配置文件，定义所有agent、事件生成器（镇长/Titan）、LLM模型、全局参数等。
+- **主要内容**：
+  - AGENT_PRESETS：所有智能体的详细设定，包括name、avatar（前端2D可视化）、llmPrompts（个性化prompt）、职业、性格、经济、政策敏感度等。
+  - EVENT_GENERATOR_PRESET：镇长/Titan的设定，支持独立prompt和avatar。
+  - LLM_MODELS：支持多大模型灵活切换。
+- **典型用法**：前后端均可直接读取，前端用于渲染角色、头像、属性，后端用于驱动LLM决策与事件生成。
+- **可扩展点**：可随时新增/调整角色、prompt、经济/政策设定、avatar等。
+
+### models.py
+- **作用**：全局数据结构定义，基于Pydantic。
+- **主要内容**：
+  - Agent、Event、Memory、Relationship等核心模型，支持llmPrompts、avatar等自定义字段。
+- **典型用法**：所有API、数据库、服务层严格依赖这些模型，保证数据一致性。
+- **可扩展点**：可扩展agent属性、记忆类型、事件结构等。
 
 ### main.py
-- FastAPI 应用主入口，注册所有 routers，配置 CORS、WebSocket、主循环等。
-- 直接用 `uvicorn backend.main:app --reload` 启动服务。
-- 可扩展全局 API、中间件、异常处理等。
+- **作用**：FastAPI应用主入口，注册所有routers，配置CORS、WebSocket、主循环等。
+- **主要内容**：API路由注册、服务启动、全局中间件。
+- **典型用法**：`uvicorn backend.main:app --reload` 启动。
+- **可扩展点**：可扩展全局API、中间件、异常处理等。
 
 ### state.py
 - 早期用于全局状态，现仅用于环境变量加载（如 API KEY）。
 - 业务数据已迁移到数据库。
 
-### config.py
-- 统一配置文件，包含 LLM 模型、agent 预设、全局参数等。
-- 可直接编辑或通过 ConfigManager 热更新。
+### loop.py
+- **作用**：仿真主循环逻辑，推进agent状态、定时生成事件。
+- **主要内容**：main_loop函数，支持多线程。
+- **典型用法**：由main.py启动仿真线程。
+- **可扩展点**：可扩展仿真节奏、事件生成策略等。
 
 ### config_manager.py
-- 动态加载和管理 config.py 配置。
-- 提供 reload、get_llm_models、get_agent_presets 等方法。
-
-### loop.py
-- 仿真主循环逻辑，定时生成事件、推进 agent 状态。
-- 由 main.py 启动线程运行。
-
-### models.py
-- 全局数据结构定义（Pydantic BaseModel）。
-- 包含 Agent、Event、Memory、ResponseModel、SimulationSettings、AgentUpdateModel 等。
-- 所有 API 入参/出参、数据库映射都用这些模型。
-
-### requirements.txt
-- Python 依赖包列表。
-- 用 `pip install -r requirements.txt` 安装。
+- **作用**：配置热加载与管理。
+- **主要内容**：get_agent_presets、reload等方法。
+- **典型用法**：state.py等动态加载agent/event配置。
+- **可扩展点**：支持前端热更新、配置版本管理等。
 
 ### test.html
-- 本地后端 API 测试页面，浏览器直接打开。
-- 可测试所有 API、事件、记忆、WebSocket 推送等。
+- **作用**：本地后端API测试页面，支持agent决策、事件生成、WebSocket推送等。
+- **主要内容**：可视化测试所有API，便于开发调试。
+- **典型用法**：浏览器直接打开。
+- **可扩展点**：可扩展为前端管理后台。
+
+### requirements.txt
+- **作用**：依赖包列表。
+- **主要内容**：fastapi、uvicorn、pydantic、openai、supabase-py等。
 
 ### __init__.py
-- Python 包标识文件。
+- **作用**：包标识。
 
 ---
 
@@ -142,12 +156,12 @@ pip install -r requirements.txt
 
 ---
 
-## 其他说明
+## 关键特色与前后端联动说明
 
-- 所有 Service 层均已与 Supabase 云数据库深度集成，所有数据操作都持久化。
-- 所有 API 路由均通过 Service 层操作，前端页面所有功能均为真实数据。
-- 如需扩展新业务，只需在 models、service、router 三层分别扩展即可。
-
----
+- **agent与事件生成器支持avatar字段**，前端2D可视化渲染友好。
+- **llmPrompts支持每个角色完全独立的个性化prompt**，极大提升智能体行为多样性。
+- **经济/政策/记忆系统深度集成**，所有决策、事件、记忆均可持久化、可追溯。
+- **前端可直接读取所有agent、事件生成器的关键信息**，实现角色列表、地图渲染、详情弹窗、实时日志等。
+- **所有API、服务、数据结构均可灵活扩展**，适合持续演化的AI小镇项目。
 
 如需更细致的开发指导或某一模块的详细用法，请查阅对应文件注释或联系维护者。 

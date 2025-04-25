@@ -66,9 +66,6 @@
     function getSimulation() {
       api('/api/simulation').then(show).catch(e => show({error: e.toString()}));
     }
-    function controlSimulation(action) {
-      api('/api/simulation?action=' + action, 'POST').then(show).catch(e => show({error: e.toString()}));
-    }
 
     let ws;
     function connectWS() {
@@ -181,10 +178,71 @@
       });
     }
 
+    let autoLoop = false;
+    let autoLoopTimer = null;
+
+    async function autoLoopStep() {
+      if (!autoLoop) return;
+      // 1. 生成新事件（LLM事件生成器）
+      await api('/api/event/llm_generate', 'POST', {});
+      await refreshEventList();
+      await showAllMemories();
+
+      // 2. 获取最新事件
+      const eventRes = await api('/api/event');
+      const events = eventRes.data || [];
+      if (!events.length) {
+        setTimeout(autoLoopStep, 2000);
+        return;
+      }
+      const lastEvent = events[events.length - 1];
+
+      // 3. 获取agent并随机顺序
+      const agentRes = await api('/api/agent');
+      const agents = agentRes.data || [];
+      let order = agents.map(a => a.id);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+
+      // 4. 依次让所有agent反应
+      for (let agentId of order) {
+        await api(`/api/agent/${agentId}/llm_decide`, 'POST', { prompt: lastEvent.description });
+        await new Promise(res => setTimeout(res, 2000)); // 缓冲
+        await new Promise(res => setTimeout(res, 5000)); // 5秒延迟，确保记忆写入
+        await showAllMemories();
+        await refreshEventList();
+      }
+
+      // 5. 所有agent反应完毕，进入下一轮
+      setTimeout(autoLoopStep, 2000);
+    }
+
+    function startAutoLoop() {
+      autoLoop = true;
+      document.getElementById('output').textContent = '事件自循环模式已启动（严格事件-全员反应-再事件）';
+      autoLoopStep();
+    }
+    function stopAutoLoop() {
+      autoLoop = false;
+      if (autoLoopTimer) clearTimeout(autoLoopTimer);
+      document.getElementById('output').textContent = '事件自循环模式已暂停';
+    }
+
+    function controlSimulation(action) {
+      api('/api/simulation?action=' + action, 'POST').then(show).catch(e => show({error: e.toString()}));
+      if (action === 'start') startAutoLoop();
+      if (action === 'pause' || action === 'reset') stopAutoLoop();
+    }
+
     // 页面加载时自动刷新事件和记忆
     window.onload = function() {
       refreshEventList();
       showAllMemories();
+      const info = document.createElement('div');
+      info.innerHTML = '<b style="color:#0a0">提示：</b> 启动Simulation后将自动进入严格"事件-全员反应-再事件"自循环模式，agent会依次对事件自动反应。';
+      document.body.insertBefore(info, document.body.firstChild);
     };
   </script>
 </body>
