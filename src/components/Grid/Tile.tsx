@@ -1,5 +1,5 @@
 import { Tile as TileType } from '@/types';
-import { TERRAIN_CONFIG } from './constants';
+import { TERRAIN_CONFIG, TILE_SIZE } from './constants';
 import clsx from 'clsx';
 import { TileType as TileEnum } from '@/types/grid';
 
@@ -24,13 +24,16 @@ export const Tile: React.FC<TileProps> = ({ tile, isSelected, onClick }) => {
   return (
     <div
       className={clsx(
-        'tile',
         terrainConfig.color,
+        'flex items-center justify-center border-2 border-gray-400',
         isSelected && 'ring-2 ring-blue-500 z-20',
         !tile.isWalkable && 'cursor-not-allowed',
-        'cursor-pointer hover:opacity-80 flex items-center justify-center',
-        'transition-all'
+        'cursor-pointer hover:opacity-80 transition-all'
       )}
+      style={{
+        width: `${TILE_SIZE}px`,
+        height: `${TILE_SIZE}px`,
+      }}
       onClick={onClick}
     >
       <span className="text-lg opacity-70">{tileEmoji[tile.type]}</span>

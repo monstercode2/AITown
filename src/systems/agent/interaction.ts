@@ -1,7 +1,7 @@
-import { Agent, AgentState, Relationship } from '@/types/agent';
-import { Position } from '@/types/grid';
-import { DashscopeClient } from '@/lib/llm/client/dashscope';
-import { generateDialoguePrompt, generateInteractionPrompt } from '@/lib/llm/prompts/agent-interaction';
+import { Agent, AgentState, Relationship } from '../../types/agent';
+import { Position } from '../../types/grid';
+import { DashscopeClient } from '../../lib/llm/client/dashscope';
+import { generateDialoguePrompt, generateInteractionPrompt } from '../../lib/llm/prompts/agent-interaction';
 
 /**
  * 检查两个 Agent 是否在交互范围内

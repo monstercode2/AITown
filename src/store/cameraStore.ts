@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Position } from '@/types/grid';
+import { Position } from '../types/grid';
 
 interface CameraState {
   position: Position;        // 摄像机位置

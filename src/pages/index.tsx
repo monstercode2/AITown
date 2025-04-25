@@ -1,21 +1,20 @@
 import { useEffect, useState } from 'react';
-import { GridContainer } from '@/components/Grid/GridContainer';
 import { useGridStore } from '@/store/gridStore';
 import { useAgentStore } from '@/store/agentStore';
 import { useEventStore } from '@/store/eventStore';
-import { AgentSprite } from '@/components/Agent/AgentSprite';
 import { AgentInfo } from '@/components/Agent/AgentInfo';
 import { EventLog } from '@/components/UI/EventLog';
 import { AgentList } from '@/components/UI/AgentList';
 import { Controls } from '@/components/UI/Controls';
 import TimeDisplay from '@/components/UI/TimeDisplay';
-import { AgentState } from '@/types/agent';
+import { GameMap } from '@/components/Grid/GameMap';
 import Link from 'next/link';
 
 export default function Home() {
   const initializeGrid = useGridStore((state) => state.initializeGrid);
   const { getAgent, getAllAgents, initializeAgents } = useAgentStore();
   const events = useEventStore((state) => state.events);
+  const fetchEvents = useEventStore((state) => state.fetchEvents);
   const [activeTab, setActiveTab] = useState<'agents' | 'events'>('agents');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
@@ -25,7 +24,11 @@ export default function Home() {
     
     // 初始化Agent
     initializeAgents();
-  }, [initializeGrid, initializeAgents]);
+    // 定时拉取事件
+    fetchEvents();
+    const interval = setInterval(fetchEvents, 5000);
+    return () => clearInterval(interval);
+  }, [initializeGrid, initializeAgents, fetchEvents]);
 
   const selectedAgent = selectedAgentId ? getAgent(selectedAgentId) : null;
   const agentList = getAllAgents();
@@ -58,20 +61,11 @@ export default function Home() {
         <div className="flex gap-4">
           {/* 左侧：地图和Agent */}
           <div className="flex-grow relative">
-            <div className="relative">
-              <GridContainer />
-              {/* Agent层 */}
-              <div className="absolute top-0 left-0">
-                {agentList.map((agent) => (
-                  <AgentSprite
-                    key={agent.id}
-                    agent={agent}
-                    isSelected={agent.id === selectedAgentId}
-                    onClick={() => selectAgent(agent.id)}
-                  />
-                ))}
-              </div>
-            </div>
+            {/* 使用新的GameMap组件 */}
+            <GameMap
+              onSelectAgent={selectAgent}
+              selectedAgentId={selectedAgentId}
+            />
             
             {/* 模拟控制 */}
             <Controls className="mt-4" />

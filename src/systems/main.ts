@@ -1,14 +1,17 @@
-import { Agent } from '@/types/agent';
-import { Grid, TileType, Position } from '@/types/grid';
-import { DashscopeClient } from '@/lib/llm/client/dashscope';
+import { Agent } from '../types/agent';
+import { Grid, TileType, Position } from '../types/grid';
+import { DashscopeClient } from '../lib/llm/client/dashscope';
+import { LLM_CONFIG } from '../lib/llm/config';
 import { generateEnvironmentPrompt, executeAction, parseLLMResponse } from './agent/decision';
-import { Memory } from '@/types/memory';
-import { useTimeStore } from '@/store/timeStore';
-import { useEventStore } from '@/store/eventStore';
-import { Event, EventType, EventScope } from '@/types/event';
-import { Logger, LogCategory, LogLevel } from '@/utils/logger';
-import { getNextMove, getRandomWalkablePositionInRadius } from '@/utils/pathfinding';
-import { getTimeOfDay, getGameTime, formatTime, hasTimeElapsed } from '@/utils/time';
+import { Memory } from '../types/memory';
+import { useTimeStore } from '../store/timeStore';
+import { Event, EventType, EventScope } from '../types/event';
+import { Logger, LogCategory, LogLevel } from '../utils/logger';
+import { getNextMove, getRandomWalkablePositionInRadius } from '../utils/pathfinding';
+import { getTimeOfDay, getGameTime, formatTime, hasTimeElapsed } from '../utils/time';
+import { EventProcessor } from './event/processor';
+import { AgentReaction, EventFeedbackContext } from '../types/agent';
+import { generateAgentReaction } from './agent/decision';
 
 /**
  * 主循环系统
@@ -17,25 +20,35 @@ import { getTimeOfDay, getGameTime, formatTime, hasTimeElapsed } from '@/utils/t
 export class MainLoop {
   private agents: Agent[];
   private grid: Grid;
-  private llmClient: DashscopeClient;
   private isRunning: boolean = false;
   private isPaused: boolean = false;
   private tickInterval: number = 1000; // 1秒一个tick
   private timeStore = useTimeStore.getState();
-  private eventStore = useEventStore.getState();
+  private events: Event[] = [];
+  private eventProcessor: EventProcessor;
   private startTime: number = 0;
   private timeScale: number = 1;
   private eventFrequency: number = 0.1;
   private autoAgentDecisions: boolean = true;
   private lastAgentProcessTime: Map<string, number> = new Map(); // 记录每个Agent上次处理的时间
   private processingInterval: number = 10; // Agent决策间隔(秒)
+  private llmClients: Record<string, DashscopeClient>;
+  private eventMemories: any[] = []; // 事件生成器记忆系统
 
-  constructor(agents: Agent[], grid: Grid, llmClient: DashscopeClient) {
+  constructor(agents: Agent[], grid: Grid) {
     this.agents = agents;
     this.grid = grid;
-    this.llmClient = llmClient;
+    this.eventProcessor = new EventProcessor();
     this.initializeAgentProcessTimes();
     
+    // 在构造函数里初始化 llmClients，确保此时 process.env 已经有值
+    this.llmClients = {
+      'deepseek-v3': new DashscopeClient({ apiKey: process.env.DASHSCOPE_API_KEY || '', model: 'deepseek-v3' }),
+      'qwen-max': new DashscopeClient({ apiKey: process.env.DASHSCOPE_API_KEY || '', model: 'qwen-max' }),
+      'qwq-plus': new DashscopeClient({ apiKey: process.env.DASHSCOPE_API_KEY || '', model: 'qwq-plus' }),
+      'llama-4-scout-17b-16e-instruct': new DashscopeClient({ apiKey: process.env.DASHSCOPE_API_KEY || '', model: 'llama-4-scout-17b-16e-instruct' })
+    };
+
     Logger.info(LogCategory.SYSTEM, '主循环初始化完成', {
       agentCount: agents.length,
       gridSize: `${grid.width}x${grid.height}`
@@ -214,7 +227,8 @@ export class MainLoop {
         }
       };
 
-      this.eventStore.addEvent(newEvent);
+      this.events.push(newEvent);
+      this.eventProcessor.processEvent(newEvent, this.agents);
       Logger.info(LogCategory.EVENT, `生成每日事件: ${eventDescription}`);
     } catch (error) {
       Logger.error(LogCategory.EVENT, '生成每日事件错误', error);
@@ -247,9 +261,10 @@ export class MainLoop {
       // 生成环境描述
       const prompt = generateEnvironmentPrompt(envInfo);
 
-      // 获取LLM决策
+      // 根据agent.llmModel选择DashscopeClient
+      const llmClient = this.llmClients[agent.llmModel] || this.llmClients['qwen-max'];
       const startTime = Date.now();
-      const response = await this.llmClient.generateAgentDecision(prompt);
+      const response = await llmClient.generateAgentDecision(prompt);
       const llmTime = Date.now() - startTime;
       Logger.debug(LogCategory.LLM, `LLM响应时间: ${llmTime}ms`, { agentId: agent.id });
 
@@ -366,7 +381,9 @@ export class MainLoop {
 
       Logger.debug(LogCategory.EVENT, '正在生成事件', context);
       const startTime = Date.now();
-      const eventDescription = await this.llmClient.generateEvent(JSON.stringify(context));
+      // 事件统一用qwq-plus模型
+      const eventClient = this.llmClients['qwq-plus'];
+      const eventDescription = await eventClient.generateEvent(JSON.stringify(context));
       const llmTime = Date.now() - startTime;
       Logger.debug(LogCategory.LLM, `事件生成LLM响应时间: ${llmTime}ms`);
       
@@ -385,7 +402,8 @@ export class MainLoop {
         impact: {}
       };
 
-      this.eventStore.addEvent(newEvent);
+      this.events.push(newEvent);
+      this.eventProcessor.processEvent(newEvent, this.agents);
       Logger.info(LogCategory.EVENT, `生成事件: ${eventDescription}`, {
         affectedAgents,
         type: EventType.ENVIRONMENTAL
@@ -433,9 +451,7 @@ export class MainLoop {
    * 获取最近的事件
    */
   private getRecentEvents(): string[] {
-    return this.eventStore.events
-      .slice(-5)
-      .map((event: Event) => event.description);
+    return this.events.slice(-5).map((event: Event) => event.description);
   }
 
   /**
@@ -489,5 +505,75 @@ export class MainLoop {
    */
   public isSimulationRunning(): boolean {
     return this.isRunning;
+  }
+
+  public getEvents(): Event[] {
+    const events = this.events;
+    console.log('[MainLoop.getEvents] 返回事件数量:', events.length);
+    return events;
+  }
+
+  /**
+   * 多轮事件-反应-再事件主流程
+   */
+  private async handleEventChain(context: any, maxRounds = 2) {
+    let currentContext = context;
+    let round = 0;
+    let lastEvent: any = null;
+    while (round < maxRounds) {
+      // 1. 生成事件时带入部分记忆
+      const memoryContext = this.eventMemories.slice(-5); // 只带入最近5条
+      const eventClient = this.llmClients['qwq-plus'];
+      const eventRaw = await eventClient.generateEvent(JSON.stringify({ ...currentContext, memoryContext }));
+      let eventObj: any;
+      try {
+        eventObj = typeof eventRaw === 'string' ? JSON.parse(eventRaw) : eventRaw;
+      } catch {
+        eventObj = { description: eventRaw };
+      }
+      // 2. 记录事件
+      this.events.push({
+        id: Date.now().toString() + '-' + round,
+        type: EventType.ENVIRONMENTAL,
+        scope: EventScope.LOCAL,
+        description: eventObj.description || '',
+        affectedAgents: (eventObj.affectedAgents || []),
+        startTime: Date.now(),
+        duration: 300000,
+        impact: {},
+        meta: eventObj
+      });
+      // 3. agent 反应
+      const agentReactions: AgentReaction[] = [];
+      for (const agentId of (eventObj.affectedAgents || [])) {
+        const agent = this.agents.find(a => a.id === agentId);
+        if (!agent) continue;
+        const llmClient = this.llmClients[agent.llmModel] || this.llmClients['qwen-max'];
+        const reaction = await generateAgentReaction(agent, eventObj, llmClient);
+        agentReactions.push(reaction);
+        // 检查是否有连锁事件
+        if (reaction.triggeredEvent) {
+          // 递归推进连锁事件，防止死循环只递归一轮
+          await this.handleEventChain({
+            trigger: 'agent_reaction',
+            sourceAgent: agent.id,
+            reaction,
+            worldState: undefined
+          }, 1);
+        }
+      }
+      // 4. 汇总反馈上下文
+      const feedbackContext: EventFeedbackContext = {
+        event: eventObj,
+        agentReactions
+      };
+      // 5. 递归推进
+      currentContext = feedbackContext;
+      lastEvent = eventObj;
+      // 6. 存入事件生成器记忆
+      this.eventMemories.push({ event: eventObj, agentReactions });
+      round++;
+    }
+    return lastEvent;
   }
 } 

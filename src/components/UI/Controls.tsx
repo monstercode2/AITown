@@ -36,10 +36,12 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [systemInfo, setSystemInfo] = useState<any>(null);
 
+  const API_BASE = 'http://localhost:3001/api/simulation';
+
   // 获取当前模拟状态
   const fetchStatus = async () => {
     try {
-      const response = await fetch('/api/simulation');
+      const response = await fetch(API_BASE);
       if (!response.ok) throw new Error('获取状态失败');
       
       const data = await response.json();
@@ -79,7 +81,7 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/simulation?action=start', {
+      const response = await fetch(`${API_BASE}?action=start`, {
         method: 'POST',
       });
       
@@ -104,7 +106,7 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/simulation?action=pause', {
+      const response = await fetch(`${API_BASE}?action=pause`, {
         method: 'POST',
       });
       
@@ -128,7 +130,7 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/simulation?action=reset', {
+      const response = await fetch(`${API_BASE}?action=reset`, {
         method: 'POST',
       });
       
@@ -152,7 +154,7 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/simulation?action=settings', {
+      const response = await fetch(`${API_BASE}?action=settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -274,10 +276,10 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
           <div className="flex items-center space-x-1">
             <span className="text-xs">速度:</span>
             <select
-              value={settings.timeScale}
+              value={settings?.timeScale ?? 1}
               onChange={(e) => handleSpeedChange(Number(e.target.value))}
               className="bg-gray-700 text-white text-xs px-1 py-1 rounded outline-none"
-              disabled={isLoading || status === 'idle'}
+              disabled={isLoading || status === 'idle' || !settings}
             >
               {speedOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -295,12 +297,12 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
               min="0"
               max="1"
               step="0.1"
-              value={settings.eventFrequency}
+              value={settings?.eventFrequency ?? 0.5}
               onChange={(e) => handleEventFrequencyChange(Number(e.target.value))}
               className="w-16 h-1"
-              disabled={isLoading || status === 'idle'}
+              disabled={isLoading || status === 'idle' || !settings}
             />
-            <span className="text-xs w-6">{(settings.eventFrequency * 100).toFixed(0)}%</span>
+            <span className="text-xs w-6">{((settings?.eventFrequency ?? 0.5) * 100).toFixed(0)}%</span>
           </div>
 
           {/* 重置按钮 */}
@@ -329,7 +331,7 @@ export const Controls: React.FC<ControlsProps> = ({ className = '' }) => {
             <div className="flex justify-between">
               <span>运行时间: {systemInfo.uptime}</span>
               <span>Agent数量: {systemInfo.agentCount}</span>
-              <span>自动决策: {settings.autoAgentDecisions ? '开启' : '关闭'}</span>
+              <span>自动决策: {settings?.autoAgentDecisions === undefined ? '未知' : (settings.autoAgentDecisions ? '开启' : '关闭')}</span>
             </div>
           </div>
         )}

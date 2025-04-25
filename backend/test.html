@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Town FastAPI 后端测试页</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2em; }
+    button { margin: 0.5em; }
+    pre { background: #f4f4f4; padding: 1em; border-radius: 6px; }
+    .ws { color: #0a0; }
+    .err { color: #c00; }
+    .section { margin-bottom: 2em; }
+    .agent-block { margin-bottom: 1em; padding: 0.5em; border: 1px solid #ddd; border-radius: 6px; background: #fafbfc; }
+    .event-block { margin-bottom: 0.5em; }
+    .reaction-block { color: #005; background: #eef; margin-bottom: 0.5em; padding: 0.5em; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>AI Town FastAPI 后端测试页</h1>
+  <div>
+    <button onclick="getAgents()">获取所有Agent</button>
+    <button onclick="getEvents()">获取所有Event</button>
+    <button onclick="getSimulation()">获取Simulation状态</button>
+    <button onclick="controlSimulation('start')">启动Simulation</button>
+    <button onclick="controlSimulation('pause')">暂停Simulation</button>
+    <button onclick="controlSimulation('reset')">重置Simulation</button>
+    <button onclick="connectWS()">连接WebSocket</button>
+    <button onclick="generateEvent()">生成事件</button>
+    <button onclick="showAllMemories()">所有Agent记忆</button>
+    <button onclick="agentReactToEvent()">Agent对事件反应</button>
+  </div>
+  <div class="section">
+    <h2>接口返回</h2>
+    <pre id="output"></pre>
+  </div>
+  <div class="section">
+    <h2>WebSocket 推送</h2>
+    <pre id="ws"></pre>
+  </div>
+  <div class="section">
+    <h2>事件列表</h2>
+    <div id="eventList"></div>
+  </div>
+  <div class="section">
+    <h2>Agent记忆与最新反应</h2>
+    <div id="agentMemories"></div>
+  </div>
+  <script>
+    const api = (path, method = 'GET', body = null) =>
+      fetch('http://127.0.0.1:8000' + path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : null
+      }).then(r => r.json());
+
+    function show(data) {
+      document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    function getAgents() {
+      api('/api/agent').then(show).catch(e => show({error: e.toString()}));
+    }
+    function getEvents() {
+      api('/api/event').then(show).catch(e => show({error: e.toString()}));
+    }
+    function getSimulation() {
+      api('/api/simulation').then(show).catch(e => show({error: e.toString()}));
+    }
+    function controlSimulation(action) {
+      api('/api/simulation?action=' + action, 'POST').then(show).catch(e => show({error: e.toString()}));
+    }
+
+    let ws;
+    function connectWS() {
+      if (ws) ws.close();
+      ws = new WebSocket('ws://127.0.0.1:8000/ws/simulation');
+      ws.onopen = () => logWS('WebSocket已连接');
+      ws.onmessage = e => logWS(e.data);
+      ws.onerror = e => logWS('WebSocket错误', true);
+      ws.onclose = () => logWS('WebSocket已断开');
+    }
+    function logWS(msg, err) {
+      const el = document.getElementById('ws');
+      el.innerHTML += `<div class="${err ? 'err' : 'ws'}">${msg}</div>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // 新增：生成事件（LLM）
+    function generateEvent() {
+      // 自动采集当前环境和agent状态
+      Promise.all([
+        api('/api/agent'),
+        api('/api/simulation')
+      ]).then(([agentRes, simRes]) => {
+        const agents = (agentRes.data || []).map(a => ({
+          id: a.id,
+          name: a.name,
+          position: a.position,
+          currentAction: a.currentAction,
+          state: a.state
+        }));
+        // 简单时间信息
+        const now = new Date();
+        const context = {
+          time: now.getHours() < 6 ? '凌晨' : now.getHours() < 12 ? '上午' : now.getHours() < 18 ? '下午' : '晚上',
+          day: now.getDate(),
+          hour: now.getHours(),
+          agents
+        };
+        api('/api/event/llm_generate', 'POST', context).then(r => {
+          show(r);
+          refreshEventList();
+        });
+      });
+    }
+
+    // 展示所有 agent 的记忆
+    function showAllMemories() {
+      api('/api/agent').then(res => {
+        const agents = res.data || [];
+        let html = '';
+        let finished = 0;
+        agents.forEach(agent => {
+          api(`/api/memory?agent_id=${agent.id}&limit=5`).then(memRes => {
+            const memories = memRes.data || [];
+            html += `<div class="agent-block"><b>${agent.name}</b> (ID: ${agent.id})<br/>`;
+            html += '<u>记忆：</u><ul>';
+            memories.slice(-5).reverse().forEach(m => {
+              html += `<li>${m.content} <span style='color:#888'>[${m.type}]</span></li>`;
+            });
+            html += '</ul></div>';
+          }).finally(() => {
+            finished++;
+            if (finished === agents.length) {
+              document.getElementById('agentMemories').innerHTML = html;
+            }
+          });
+        });
+      });
+    }
+
+    // 展示所有事件
+    function refreshEventList() {
+      api('/api/event').then(res => {
+        const events = res.data || [];
+        let html = '';
+        events.slice(-10).reverse().forEach(e => {
+          html += `<div class="event-block">[${e.type}] ${e.description} <span style='color:#888'>(影响: ${e.affectedAgents.join(',')})</span></div>`;
+        });
+        document.getElementById('eventList').innerHTML = html;
+      });
+    }
+
+    // Agent 对最近事件做出 LLM 反应
+    function agentReactToEvent() {
+      api('/api/agent').then(res => {
+        const agents = res.data || [];
+        api('/api/event').then(evres => {
+          const events = evres.data || [];
+          if (!events.length) {
+            alert('无事件可反应');
+            return;
+          }
+          const lastEvent = events[events.length - 1];
+          let html = '';
+          agents.forEach(agent => {
+            // prompt 用事件描述
+            api(`/api/agent/${agent.id}/llm_decide`, 'POST', { prompt: lastEvent.description })
+              .then(r => {
+                html += `<div class="reaction-block"><b>${agent.name}</b> 的反应：${r.data.response}</div>`;
+                showAllMemories();
+                refreshEventList();
+                document.getElementById('agentMemories').innerHTML += html;
+              })
+              .catch(e => {
+                html += `<div class="reaction-block err"><b>${agent.name}</b> 反应失败: ${e.toString()}</div>`;
+                document.getElementById('agentMemories').innerHTML += html;
+              });
+          });
+        });
+      });
+    }
+
+    // 页面加载时自动刷新事件和记忆
+    window.onload = function() {
+      refreshEventList();
+      showAllMemories();
+    };
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Grid, Position, Tile } from '@/types';
-import { GRID_HEIGHT, GRID_WIDTH, INITIAL_MAP_LAYOUT, TERRAIN_CONFIG } from '@/components/Grid/constants';
+import { Grid, Position, Tile } from '../types/grid';
+import { GRID_HEIGHT, GRID_WIDTH, INITIAL_MAP_LAYOUT, TERRAIN_CONFIG } from '../components/Grid/constants';
 import { StateCreator } from 'zustand/vanilla';
 
 interface GridState {

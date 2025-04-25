@@ -1,5 +1,5 @@
 import { Position, GridSize } from '../../types/grid';
-import { Agent } from '@/types/agent';
+import { Agent } from '../../types/agent';
 
 /**
  * 移动方向枚举

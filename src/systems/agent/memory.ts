@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Memory, MemoryType, ImportanceLevel, MemoryQueryOptions, MemoryQueryResult } from '@/types/memory';
-import { Agent } from '@/types/agent';
+import { Memory, MemoryType, ImportanceLevel, MemoryQueryOptions, MemoryQueryResult } from '../../types/memory';
+import { Agent } from '../../types/agent';
 
 /**
  * 记忆管理器类

@@ -77,7 +77,8 @@ function createDefaultAgents(): Agent[] {
         energy: 80,
         social: 60,
         fun: 70
-      }
+      },
+      llmModel: 'qwen-max'
     },
     {
       id: '2',
@@ -108,7 +109,8 @@ function createDefaultAgents(): Agent[] {
         energy: 90,
         social: 70,
         fun: 60
-      }
+      },
+      llmModel: 'qwen-max'
     }
   ];
 }
@@ -123,12 +125,12 @@ function getSimulation() {
       
       // 创建LLM客户端实例
       const llmClient = new DashscopeClient({
-        apiKey: process.env.DASHSCOPE_API_KEY || 'sk-19330bcc71ed4c71a13bb0523e005f71',
+        apiKey: process.env.DASHSCOPE_API_KEY || '',
         model: LLM_CONFIG.DASHSCOPE.MODEL
       });
 
       // 创建新实例
-      simulationInstance = new MainLoop(agents, grid, llmClient);
+      simulationInstance = new MainLoop(agents, grid);
       
       // 应用设置
       simulationInstance.setTimeScale(currentSettings.timeScale);

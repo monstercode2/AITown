@@ -1,8 +1,9 @@
-import { Agent } from '@/types/agent';
-import { Position, TileType, Grid } from '@/types/grid';
+import { Agent } from '../../types/agent';
+import { Position, TileType, Grid } from '../../types/grid';
 import { Direction, tryMoveAgent } from './movement';
-import { Memory, ImportanceLevel, MemoryType } from '@/types/memory';
+import { Memory, ImportanceLevel, MemoryType } from '../../types/memory';
 import { getRelationshipStatus } from './interaction';
+import { AgentReaction } from '../../types/agent';
 
 /**
  * Agent 行为类型
@@ -239,5 +240,36 @@ export function executeAction(
         agent.memories.push(memory);
       }
       break;
+  }
+}
+
+/**
+ * 生成 Agent 针对事件的反应（可调用 LLM 或规则）
+ */
+export async function generateAgentReaction(agent: Agent, event: any, llmClient: any): Promise<AgentReaction> {
+  // 构造 prompt，带入记忆、关系、状态
+  const memories = agent.memories.slice(-3).map(m => `- ${m.content}`).join('\n');
+  const relationships = Array.from(agent.relationships.entries()).map(([id, rel]) => `${id}: 好感度${rel.affinity}`).join('，');
+  const prompt = `你是AI小镇的居民（${agent.name}）。\n你的记忆片段如下：\n${memories || '（无）'}\n你与其他人的关系：${relationships || '（无）'}\n你当前状态：${agent.state}，${agent.currentAction || ''}\n请针对以下事件做出你的反应（只描述你自己的行动和情绪，不要生成事件本身）。\n\n事件内容：\n${typeof event === 'string' ? event : JSON.stringify(event)}\n\n如果你的反应会引发新的事件或影响其他agent，请在JSON中用 triggeredEvent 字段详细描述（如通知、协作、警觉、请求帮助等）。\n请输出你的反应，格式为JSON。`;
+  // 调用 LLM
+  const response = await llmClient.generateAgentDecision(prompt);
+  // 解析 LLM 响应为 AgentReaction
+  try {
+    const reaction = JSON.parse(response);
+    return {
+      agentId: agent.id,
+      action: reaction.action || '',
+      detail: reaction.detail || '',
+      stateChange: reaction.stateChange,
+      emotionChange: reaction.emotionChange,
+      triggeredEvent: reaction.triggeredEvent // 新增，支持连锁
+    };
+  } catch (e) {
+    // fallback: 只返回字符串
+    return {
+      agentId: agent.id,
+      action: '未知',
+      detail: response
+    };
   }
 } 

@@ -1,4 +1,4 @@
-import { TileType } from '@/types';
+import { TileType } from '../../types/grid';
 
 // 地图尺寸
 export const GRID_WIDTH = 10;

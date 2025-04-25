@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { Agent, AgentState as AgentStateEnum, Relationship } from '@/types/agent';
-import { Memory } from '@/types/memory';
+import { Agent, AgentState as AgentStateEnum, Relationship } from '../types/agent';
+import { Memory } from '../types/memory';
+import { isPositionWalkable, printGridMap } from '../utils/grid';
 
 interface AgentState {
   agents: Map<string, Agent>;
@@ -88,11 +89,46 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     // 清除现有的Agent
     store.clearAgents();
     
+    // 用于调试 - 打印地图格子映射
+    printGridMap();
+    
+    // 确保位置在可行走格子上的辅助函数
+    const getValidPosition = (x: number, y: number) => {
+      const position = { x, y };
+      
+      // 如果当前位置可行走，直接返回
+      if (isPositionWalkable(position)) {
+        console.log(`位置(${x}, ${y})可行走`);
+        return position;
+      }
+      
+      // 否则在附近找个可行走的格子
+      console.log(`位置(${x}, ${y})不可行走，寻找附近可行走格子...`);
+      
+      // 检查附近的格子（1-2格范围内）
+      for (let offsetY = -2; offsetY <= 2; offsetY++) {
+        for (let offsetX = -2; offsetX <= 2; offsetX++) {
+          // 跳过自身
+          if (offsetX === 0 && offsetY === 0) continue;
+          
+          const newPos = { x: x + offsetX, y: y + offsetY };
+          if (isPositionWalkable(newPos)) {
+            console.log(`找到可行走位置: (${newPos.x}, ${newPos.y})`);
+            return newPos;
+          }
+        }
+      }
+      
+      // 如果附近没找到，返回默认安全位置
+      console.log(`未找到附近可行走位置，返回默认位置(1, 1)`);
+      return { x: 1, y: 1 };
+    };
+    
     // 添加预设的初始Agent
     store.addAgent({
       id: '1',
       name: '小明',
-      position: { x: 5, y: 5 },
+      position: { x: 1, y: 1 }, // GROUND格子
       state: AgentStateEnum.IDLE,
       relationships: new Map<string, Relationship>(),
       memories: [],
@@ -122,7 +158,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     store.addAgent({
       id: '2',
       name: '小红',
-      position: { x: 10, y: 10 },
+      position: { x: 3, y: 3 }, // GROUND格子
       state: AgentStateEnum.IDLE,
       relationships: new Map<string, Relationship>(),
       memories: [],
@@ -154,7 +190,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     store.addAgent({
       id: '3',
       name: '老王',
-      position: { x: 15, y: 5 },
+      position: { x: 1, y: 5 }, // GROUND格子
       state: AgentStateEnum.WORKING,
       relationships: new Map<string, Relationship>(),
       memories: [],
@@ -187,7 +223,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     store.addAgent({
       id: '4',
       name: '小张',
-      position: { x: 7, y: 15 },
+      position: { x: 7, y: 7 }, // GROUND格子
       state: AgentStateEnum.RESTING,
       relationships: new Map<string, Relationship>(),
       memories: [],

@@ -56,4 +56,22 @@ export interface Agent {
     [key: string]: number;
   };
   attributes: AgentAttributes;
+  llmModel: string; // 新增字段，指定该Agent使用的大模型
+}
+
+// Agent 针对事件的反应结构
+export interface AgentReaction {
+  agentId: string;
+  action: string; // 如"调查"、"协作"、"警觉"等
+  detail: string; // 具体行动描述
+  stateChange?: any; // 状态/属性变化
+  emotionChange?: any; // 情绪变化
+  triggeredEvent?: any; // 支持 agent 连锁反应
+}
+
+// 事件-反应-再事件的反馈上下文结构
+export interface EventFeedbackContext {
+  event: any; // Event 类型或 LLM 原始事件 JSON
+  agentReactions: AgentReaction[];
+  worldState?: any; // 可选，环境变化、奖励等
 } 

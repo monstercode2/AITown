@@ -10,6 +10,16 @@ body {
   @apply bg-gray-100 text-gray-900;
 }
 
+/* 全局样式，避免使用绝对尺寸 */
+.agent-container {
+  position: relative;
+  overflow: visible;
+}
+
+.grid-container {
+  position: relative;
+}
+
 .tile {
   width: var(--tile-size);
   height: var(--tile-size);

@@ -30,4 +30,5 @@ export interface Event {
     energy?: number;       // 对精力的影响
     sociability?: number;  // 对社交倾向的影响
   };
+  meta?: any; // 新增：用于存储事件原始 LLM JSON、事件链上下文等
 } 

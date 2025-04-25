@@ -1,0 +1,43 @@
+# AI Town 前后端分离迁移顺序文档
+
+## 1. 规划与准备
+- 明确前端（Next.js）和后端（FastAPI）各自职责
+- 设计后端 API 结构（如 /api/simulation, /api/agent, /api/event 等）
+- 确认数据结构（Agent、Event 等）在前后端一致
+
+## 2. 后端（FastAPI）搭建
+- 新建 backend 目录，初始化 FastAPI 项目
+- 编写 main.py，定义 Agent、Event 等数据模型
+- 实现 /api/simulation、/api/agent、/api/event、/api/agents/log 等接口
+- 支持 CORS，便于前端本地开发
+- 用 requirements.txt 管理依赖
+- 支持 .env 环境变量（如 DASHSCOPE_API_KEY）
+
+## 3. 迁移业务逻辑
+- 将原 Node/TS 后端的主循环、事件链、Agent 决策等逻辑逐步用 Python 实现
+- 保证接口风格、数据结构与前端兼容
+- 保留内存数据结构，后续可接数据库
+
+## 4. 前端适配
+- 将所有 fetch/axios 的 /api/xxx 请求改为指向 FastAPI 后端（如 http://localhost:8000/api/xxx）
+- 测试前端页面与新后端的接口兼容性
+- 如有必要，调整前端数据解析逻辑
+
+## 5. 测试与联调
+- 用 Postman/curl 等工具测试 FastAPI 各接口
+- 前端联调，确保页面功能正常
+- 检查跨域、鉴权、API 错误处理等细节
+
+## 6. 部署与优化
+- 后端可用 uvicorn/gunicorn 部署，前端用 Vercel/Netlify/自建服务器
+- 可选：将内存数据结构替换为数据库（如 SQLite/PostgreSQL）
+- 可选：接口文档自动生成（FastAPI 自带 Swagger）
+
+## 7. 后续扩展
+- 支持 WebSocket 实时推送
+- 支持分布式/微服务架构
+- 支持更多 AI 能力和异步任务
+
+---
+
+如需详细迁移脚本、接口文档或自动化测试方案，请联系开发负责人。 
