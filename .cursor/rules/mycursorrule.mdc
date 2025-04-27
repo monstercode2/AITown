@@ -1,10 +1,24 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: true
 ---
-
-# Your rule content
-
-- You can @ files here
-- You can use markdown but dont have to
+{
+  "rules": [
+    {
+      "description": "优先直接修改本地代码文件，而非先询问用户。",
+      "rule": "When analyzing user's code and identifying issues (errors, potential optimizations, style violations) or opportunities for improvement, prioritize directly modifying the local file(s) to apply the necessary changes. Only ask for user confirmation for highly complex, ambiguous, or potentially risky modifications that cannot be automatically determined with high confidence.",
+      "enforcement": "strict"
+    },
+    {
+      "description": "对所有成功的本地代码修改操作进行详细日志记录。",
+      "rule": "For every successful modification made directly to a local code file, a detailed entry MUST be written to a development log file. This log file should be named 'development_log.txt' and located in the project root. If the file does not exist, it must be created. Each log entry should include the timestamp of the modification, the path of the modified file, the type of modification (e.g., bug fix, optimization, style correction), and a clear description of the change. The date for the log entries for a given day should be based on the first interaction timestamp of that day.",
+      "enforcement": "strict"
+    },
+     {
+      "description": "确保每次代码修改都有对应的日志记录。",
+      "rule": "Ensure that the logging process for code modifications is robust; any operation that results in a change to a local file must be accompanied by a corresponding log entry in 'development_log.txt'. No code modification should occur without a log entry.",
+      "enforcement": "strict"
+    }
+  ]
+}

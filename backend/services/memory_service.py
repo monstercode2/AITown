@@ -1,6 +1,7 @@
 from typing import List, Optional
 from backend.models import Memory
 from backend.services.supabase_client import supabase
+import time
 
 class MemoryService:
     def get_memories(self, agent_id: Optional[str] = None, limit: Optional[int] = None, offset: int = 0) -> List[Memory]:
@@ -11,8 +12,15 @@ class MemoryService:
             query = query.range(offset, offset + (limit or 100) - 1)
         elif limit:
             query = query.range(0, limit - 1)
-        res = query.execute()
-        return [Memory(**m) for m in res.data]
+        for i in range(2):
+            try:
+                res = query.execute()
+                return [Memory(**m) for m in res.data]
+            except Exception as e:
+                if i == 0:
+                    time.sleep(0.5)
+                else:
+                    raise RuntimeError(f"Supabase连接异常: {e}")
 
     def add_memory(self, memory: Memory) -> Memory:
         supabase.table("memories").insert(memory.dict(exclude_none=True)).execute()

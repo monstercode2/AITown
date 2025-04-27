@@ -13,22 +13,24 @@ class LLMService:
         if not hasattr(agent, 'llmPrompts') or 'decision' not in agent.llmPrompts:
             raise ValueError(f"Agent {agent.name} 未配置决策prompt (llmPrompts['decision'])")
         prompt_template = agent.llmPrompts['decision']
-        # 记忆区分类型
-        memories_by_type = {'政策': [], '事件': [], '对话': [], '其他': []}
-        for m in sorted(agent.memories, key=lambda m: -m.importance)[:5]:
-            if '政策' in m.content or m.type == 'POLICY':
-                memories_by_type['政策'].append(m)
-            elif m.type == 'EVENT':
-                memories_by_type['事件'].append(m)
-            elif m.type == 'DIALOGUE':
-                memories_by_type['对话'].append(m)
-            else:
-                memories_by_type['其他'].append(m)
-        memories_str = ''
-        for k, v in memories_by_type.items():
-            if v:
-                memories_str += f"[{k}]\n" + '\n'.join([f"- [{m.importance}级] {m.content}" for m in v]) + '\n'
-        # 关系与互动
+        # 1. 身份自觉
+        identity = f"我是{getattr(agent, 'role', '未知角色')}{agent.name}，职责是{getattr(agent, 'duty', getattr(agent, 'role', '履行本职工作'))}。"
+        # 2. 高频互动对象分析
+        from collections import Counter
+        partners = []
+        for m in agent.memories:
+            if hasattr(m, 'relatedAgents') and m.relatedAgents:
+                partners.extend(m.relatedAgents)
+        top_partners = [p for p, _ in Counter(partners).most_common(3)]
+        rel_str = f"我最近经常和{', '.join(top_partners)}互动。" if top_partners else ''
+        # 3. 记忆回溯（最近3条重要记忆）
+        important_memories = sorted(agent.memories, key=lambda m: (-m.importance, -m.timestamp))[:3]
+        mem_str = "最近记忆片段：" + "; ".join([m.content for m in important_memories]) if important_memories else ''
+        # 4. 目标动机
+        goals = getattr(agent, 'goals', None) or getattr(agent, 'goal', None) or '暂无明确目标'
+        # 5. 情感状态
+        mood = getattr(agent, 'mood', '普通')
+        # 6. 当前环境
         visible_agents_str = ''
         for other in filter(lambda a: a.id != agent.id, self.get_all_agents()):
             rel = agent.relationships.get(other.id)
@@ -36,31 +38,60 @@ class LLMService:
                 visible_agents_str += f"- {other.name}（好感度:{rel.affinity} 互动:{rel.interactions} 最近:{rel.lastInteraction or '无'}) 正在{other.currentAction or '这里'}\n"
             else:
                 visible_agents_str += f"- {other.name}（初次见面）正在{other.currentAction or '这里'}\n"
-        # policies字段详细化
         from backend.state import events as global_events
         policies = [e for e in global_events if '政策' in e.description or 'policy' in (e.meta or {})]
         policies_str = ''
         for p in policies[-3:]:
             meta = p.meta or {}
             policies_str += f"- {p.description} 类型:{meta.get('type','未知')} 目标:{meta.get('target','未知')} 影响:{meta.get('affectedAgents',meta.get('affected_agents','未知'))}\n"
-        # 其他字段
-        params = {
-            'x': agent.position.get('x'),
-            'y': agent.position.get('y'),
-            'tileType': getattr(agent, 'tileType', '未知地形'),
-            'timeOfDay': getattr(agent, 'timeOfDay', getattr(agent, 'state', '未知时间')),
-            'visibleAgents': visible_agents_str.strip(),
-            'memories': memories_str.strip(),
-            'events': '\n'.join([f"- {e.description}" for e in (events[-5:] if len(events) >= 5 else events)]),
-            'needs': ', '.join(f"{k}:{v}" for k, v in (agent.needs or {}).items()),
-            'attributes': ', '.join(f"{k}:{v}" for k, v in (agent.attributes.dict() if hasattr(agent.attributes, 'dict') else (agent.attributes if isinstance(agent.attributes, dict) else vars(agent.attributes))).items()),
-            'traits': ', '.join(agent.traits) if getattr(agent, 'traits', None) else '',
-            'mood': getattr(agent, 'mood', '普通'),
-            'schedule': '\n'.join([f"{k}:{v}" for k,v in (getattr(agent, 'schedule', {}) or {}).items()]),
-            'tags': ', '.join(getattr(agent, 'tags', [])) if hasattr(agent, 'tags') else '',
-            'policies': policies_str.strip()
-        }
-        return prompt_template.format(**params)
+        env_str = (
+            f"你现在在({agent.position.get('x')}, {agent.position.get('y')})，地形：{getattr(agent, 'tileType', '未知地形')}。时间：{getattr(agent, 'timeOfDay', getattr(agent, 'state', '未知时间'))}\n"
+            f"你视野内的人：\n{visible_agents_str.strip()}\n"
+            f"当前全局政策：\n{policies_str.strip()}"
+        )
+        # 8. 自我反思与成长机制
+        # 简单实现：统计最近10条记忆的关键词，生成自我反思
+        recent_memories = sorted(agent.memories, key=lambda m: -m.timestamp)[:10]
+        all_text = ' '.join([m.content for m in recent_memories])
+        import re
+        words = re.findall(r'[\u4e00-\u9fa5A-Za-z]+', all_text)
+        from collections import Counter
+        top_words = [w for w, _ in Counter(words).most_common(5)]
+        reflection = ''
+        if top_words:
+            reflection = f"我最近最常思考/经历的主题包括：{', '.join(top_words)}。"
+        if recent_memories:
+            first = recent_memories[-1].content
+            last = recent_memories[0].content
+            if first != last:
+                reflection += f" 与最早的记忆相比，我最近的经历有了新的变化。"
+        if not reflection:
+            reflection = "我最近没有特别的成长或困惑。"
+        # 多轮对话闭环：优先拼接"别人对我说"的最新DIALOGUE记忆
+        recent_dialogue = None
+        from_agent = None
+        for m in sorted(agent.memories, key=lambda m: -m.timestamp):
+            if m.type == 'DIALOGUE' and m.content and '对你说' in m.content:
+                recent_dialogue = m.content
+                from_agent = m.content.split('对你说')[0]
+                break
+        dialogue_str = f"你刚刚收到消息：{recent_dialogue}\n" if recent_dialogue else ''
+        # 7. 结构化思考链条prompt拼接
+        prompt = (
+            dialogue_str +
+            f"【身份自觉】{identity}\n"
+            f"【社会关系】{rel_str}\n"
+            f"【记忆回溯】{mem_str}\n"
+            f"【目标动机】{goals}\n"
+            f"【情感状态】{mood}\n"
+            f"【当前环境】\n{env_str}\n"
+            f"【自我反思】{reflection}\n"
+            + ("请针对刚刚收到的消息做出回应，并结合你的身份、记忆和目标给出决策理由。\n" if recent_dialogue else "") +
+            "请详细描述你的具体行动计划、预期结果和可能遇到的问题。\n"
+            "请分析你视野内其他人的行为、意图和需求，并思考如何与他们产生有意义的互动。\n"
+            "最后，请详细描述你的思考过程和下一步决策，并说明理由。"
+        )
+        return prompt
 
     def get_all_agents(self):
         # 避免循环依赖，延迟导入
@@ -159,17 +190,89 @@ class LLMService:
         else:
             content = completion.choices[0].message.content
         from backend.models import Memory
+        # 动态评估重要性
+        importance = 2
+        # 若LLM输出中有"重要性"字段，优先采用
+        import re
+        imp_match = re.search(r'["\']?重要性["\']?\s*[:：]\s*([0-9])', content)
+        if imp_match:
+            try:
+                importance = int(imp_match.group(1))
+            except Exception:
+                importance = 2
+        else:
+            # 根据内容关键词和类型赋值
+            if any(k in content for k in ['政策', '税', '重大', '紧急']):
+                importance = 3
+            elif any(k in content for k in ['日常', '普通', '打招呼', '观察']):
+                importance = 1
+            else:
+                importance = 2
         mem = Memory(
             id=f"llm-{int(time.time() * 1000)}",
             agent_id=agent.id,
             content=content,
             timestamp=int(time.time() * 1000),
-            importance=2,
+            importance=importance,
             type="LLM_RESPONSE",
             relatedAgents=None,
             tags=["llm"]
         )
         MemoryService().add_memory(mem)
+        # 若输出为DIALOGUE，自动为对方生成"待回应"事件
+        import re
+        from backend.services.event_service import EventService
+        pattern = re.compile(r"ACTION:\s*(SPEAK|TALK|INTERACT)[^\n]*\n.*?TARGET:\s*([\u4e00-\u9fa5A-Za-z0-9_\-]+)[^\n]*\n.*?MESSAGE:\s*['\"]?(.+?)['\"]?($|\n)", re.IGNORECASE|re.DOTALL)
+        match = pattern.search(content)
+        if match:
+            action_type = match.group(1).upper()
+            target_name = match.group(2)
+            message = match.group(3).strip()
+            all_agents = self.get_all_agents()
+            to_agent = next((a for a in all_agents if a.name == target_name or a.id == target_name), None)
+            if to_agent and message:
+                event = Event(
+                    id=str(int(time.time() * 1000)),
+                    type="DIALOGUE",
+                    description=f"{agent.name}对{to_agent.name}说: {message}",
+                    affectedAgents=[agent.id, to_agent.id],
+                    startTime=int(time.time() * 1000),
+                    duration=10000,
+                    impact={},
+                    meta={"action": action_type, "from": agent.name, "to": to_agent.name, "message": message, "pending_response": True},
+                    from_agent=agent.id,
+                    to_agent=to_agent.id,
+                    content=message
+                )
+                EventService().add_event(event)
+        # 行动结果反馈：若LLM输出有"结果"字段则写入，否则用默认模板
+        result_match = re.search(r'结果[：:]\s*([\u4e00-\u9fa5A-Za-z0-9_\-，。,.！!\s]+)', content)
+        result_text = result_match.group(1).strip() if result_match else None
+        if result_text:
+            result_mem = Memory(
+                id=f"result-{int(time.time() * 1000)}",
+                agent_id=agent.id,
+                content=f"你完成了本次行动，结果是：{result_text}",
+                timestamp=int(time.time() * 1000),
+                importance=importance,
+                type="RESULT",
+                relatedAgents=None,
+                tags=["result"]
+            )
+            MemoryService().add_memory(result_mem)
+        else:
+            # 默认模板
+            result_mem = Memory(
+                id=f"result-{int(time.time() * 1000)}",
+                agent_id=agent.id,
+                content=f"你完成了本次行动，结果待观察。",
+                timestamp=int(time.time() * 1000),
+                importance=1,
+                type="RESULT",
+                relatedAgents=None,
+                tags=["result"]
+            )
+            MemoryService().add_memory(result_mem)
         return mem
 
     def generate_event_via_llm(self, context: dict) -> dict:

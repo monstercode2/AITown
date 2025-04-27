@@ -51,6 +51,9 @@ class Event(BaseModel):
     meta: Optional[dict] = None
     scope: Optional[str] = None
     position: Optional[dict] = None
+    from_agent: Optional[str] = None
+    to_agent: Optional[str] = None
+    content: Optional[str] = None
 
 class ResponseModel(BaseModel):
     code: int = 0
