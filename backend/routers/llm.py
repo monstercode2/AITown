@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from backend.models import LLMDecideRequest, ResponseModel, Memory
 from backend.services.llm_service import LLMService
 from backend.state import agents
@@ -20,4 +20,12 @@ def agent_llm_decide(agent_id: str, req: LLMDecideRequest, service: LLMService =
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM调用失败: {e}")
-    return ResponseModel(data={"response": mem.content, "memory_id": mem.id}) 
+    return ResponseModel(data={"response": mem.content, "memory_id": mem.id})
+
+@router.post("/api/llm/embedding")
+def get_embedding_api(payload: dict = Body(...)):
+    text = payload.get("text")
+    if not text:
+        raise HTTPException(status_code=400, detail="text字段缺失")
+    embedding = LLMService().get_embedding(text)
+    return ResponseModel(data={"embedding": embedding}) 

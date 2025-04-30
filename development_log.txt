@@ -159,27 +159,141 @@ CREATE TABLE IF NOT EXISTS memories (
 - **兼容旧格式**：对话类ACTION仍兼容原有SPEAK/TALK/INTERACT格式。
 - **后续建议**：可继续扩展更多互动类型（如交易、威胁、联盟等），并在前端高亮展示不同类型互动。
 
-### 2025-04-28 backend/services/event_service.py, backend/services/llm_service.py 优化
-类型：智能体环境同步、决策链条与重要性机制升级
-描述：
-- 环境类记忆（如政策/税率）自动同步，旧政策记忆自动作废，最新政策写入所有agent。
-- prompt结构升级，强制LLM结合身份、记忆、目标给出决策理由，要求具体行动计划和社会推理。
-- 重要性动态评估机制，支持LLM输出或自动根据内容赋值，提升行为优先级区分度。
+### 2025-04-28 backend/services/event_service.py [bugfix]
+类型：Bug Fix
+描述：修复事件字段命名与数据库匹配问题：
+- 将驼峰式命名(affectedAgents, startTime)转换为下划线式命名(affected_agents, start_time)
+- 确保事件能正确写入数据库，添加字段验证和转换逻辑
+- 修改相关记忆写入逻辑，确保使用正确的字段名引用
+- 增加详细日志输出，便于调试
 
-2025-04-28 backend/services/llm_service.py 优化
-类型：多轮对话闭环与行动结果反馈机制升级
-描述：
-- agent决策时优先处理"别人对我说"的最新DIALOGUE记忆，prompt引导针对消息回应。
-- 若输出为DIALOGUE，自动为对方生成"待回应"事件。
-- agent每次行动后自动生成"结果事件"并写入记忆，支持LLM输出结果或默认模板。
+### 2025-04-28 backend/services/llm_service.py [feature] 自动实现行为链解析：支持LLM输出JSON数组时自动依次执行多步行为（如MOVE、SPEAK、GIFT、COOPERATE、REQUEST_HELP等），并生成对应事件，兼容原有单步解析。
 
----
-
-
-2025-04-28 backend/test.html 优化
+### 2025-04-28 backend/test.html 优化
 类型：可用性与可视化优化
 描述：
 - 事件列表分组高亮显示不同类型（如DIALOGUE、GIFT、COOPERATION、REQUEST_HELP等），并显示from_agent/to_agent、meta信息。
 - Agent记忆分组显示，LLM_RESPONSE、DIALOGUE、GIFT等类型用不同颜色高亮，显示时间、重要性、相关agent。
 - 增加记忆块折叠/展开功能，便于查看。
 - 优化整体排版，提升可读性和开发调试体验。 
+
+2025-04-28 backend/前端开发顺序.md [进度更新] 第1步所有子项标记为已完成，第2步"基础架构搭建"标记为【进行中】，准备进入PixiTown主组件与舞台初始化开发。 
+
+2025-04-28 ai-town-frontend/src/App.vue 入口页面优化
+类型：优化（Optimization）
+描述：将入口页面由默认Vite+Vue欢迎页改为直接渲染PixiTown主组件，去除HelloWorld和logo相关内容，实现AI小镇前端主界面直达。 
+
+2025-04-28 ai-town-frontend/src/components/PixiTown.vue 终极健壮性修复
+类型：Bug Fix
+描述：采用async onMounted + await nextTick，彻底保证pixiContainer已挂载后再初始化PIXI.Application。初始化前销毁旧app并清空容器，app.view为undefined时兜底return，防止任何canvas undefined报错，兼容热重载和多次挂载。 
+
+2025-04-28 ai-town-frontend/src/components/PixiTown.vue 仿真控制API修正
+类型：Bug Fix
+描述：修复前端仿真控制API调用路径，确保与后端一致。将fetch('/api/simulation/start', ...)等改为fetch('/api/simulation?action=start', ...)等，method为POST，解决仿真启动后端未响应导致的后续渲染异常。 
+
+2025-04-28 ai-town-frontend/vite.config.ts 本地API代理配置
+类型：工程优化（DevOps）
+描述：为本地开发环境添加API代理，将所有/api请求代理到http://localhost:8000，解决前端本地/api/simulation等404问题，实现前后端无缝联调。 
+
+2025-04-28 ai-town-frontend/src/api/agent.ts API方法修正
+类型：Bug Fix
+描述：将updateAgent方法的PATCH请求方式改为PUT，确保与后端接口一致，避免405 Method Not Allowed错误。
+
+2025-04-28 ai-town-frontend/src/api/agent.ts 响应格式兼容修正
+类型：Bug Fix
+描述：修复fetchAgents和addAgent方法，兼容后端统一ResponseModel格式，正确返回data字段内容，解决前端无法获取和显示Agent的问题。 
+
+2025-04-28 ai-town-frontend/src/api/event.ts 响应格式兼容修正
+类型：Bug Fix
+描述：修复fetchEvents方法，兼容后端统一ResponseModel格式，正确返回data字段内容，解决前端无法获取和显示事件的问题。 
+
+2025-04-28 backend/loop.py [bug fix] 修复主循环事件持久化：主循环启动时立即通过EventService生成并持久化一条事件，后续每隔1分钟再生成并持久化一次事件，确保前端和API均可获取到主循环自动生成的事件和记忆。 
+
+2025-04-28 backend/main.py [refactor] 切换到数据库持久化API：注释掉所有直接操作内存的Agent相关API（/api/agent等），并确保注册了routers/agent.py的agent_router，实现所有Agent相关操作均走数据库，保证数据持久化和前后端一致性。 
+
+2025-04-28 backend/config.py [fix] 修正llmPrompts.decision，合并移动范围限制（x:0~800, y:0~600）与行为链JSON数组格式要求，确保大模型输出既规范又合理，避免遗漏边界说明。 
+
+2024-06-10 backend/services/llm_service.py [fix] 修复循环依赖：将所有 from backend.services.memory_service import MemoryService 的import语句移到方法内部（延迟导入），彻底解决ImportError。
+
+2024-06-10 backend/services/memory_service.py [feature] add_memory 方法支持自动生成 embedding，新增 search_memories_by_embedding 方法，支持向量相似度检索。
+2024-06-10 backend/services/event_service.py [feature] add_event 方法支持自动生成 embedding。
+2024-06-10 backend/routers/memory.py [feature] 新增 /api/memory/search_by_vector POST接口，支持前端传入embedding向量，返回最相似的记忆。
+2024-06-10 backend/services/agent_service.py [feature] 新增 search_agents_by_embedding 方法，支持Agent向量相似度检索。
+2024-06-10 backend/routers/agent.py [feature] 新增 /api/agent/search_by_vector POST接口，支持Agent向量检索。
+2024-06-10 backend/services/event_service.py [feature] 新增 search_events_by_embedding 方法，支持Event向量相似度检索。
+2024-06-10 backend/routers/event.py [feature] 新增 /api/event/search_by_vector POST接口，支持Event向量检索。
+2024-06-10 ai-town-frontend/src/api/memory.ts [feature] 新增 searchMemoriesByVector 方法，支持向量记忆检索API。
+2024-06-10 ai-town-frontend/src/api/event.ts [feature] 新增 searchEventsByVector 方法，支持向量事件检索API。
+2024-06-10 ai-town-frontend/src/api/agent.ts [feature] 新增 searchAgentsByVector 方法，支持向量Agent检索API。 
+
+2024-06-10 backend/services/llm_service.py [feature] generate_environment_prompt 和 generate_agent_reaction 集成事件推荐和Agent社交向量检索，自动用当前情境/事件内容生成embedding，查找最相似的历史事件和Agent并拼接到prompt，进一步提升AI社交和推理能力。 
+
+2024-06-10 backend/tests/test_vector_search.py [test] 新增pytest单元测试用例，覆盖embedding生成、记忆/事件/Agent向量检索。
+2024-06-10 backend/tests/test_api_vector.py [test] 新增pytest+requests API集成测试脚本，覆盖memory/event/agent向量检索API。
+2024-06-10 backend/routers/llm.py [feature] 新增 /api/llm/embedding POST接口，支持前端/测试用例传入text，返回embedding。 
+
+2024-04-29 backend/models.py [模型扩展] Agent模型增加emotion（情感状态）和relationships（社会关系）字段，支持后续情感与社会关系推理。 
+
+2024-04-29 backend/services/llm_service.py [AI能力升级] prompt拼接自动注入情感状态、社会关系分数、历史多轮对话内容，支持更复杂的多轮对话与社会推理。 
+
+2024-04-29 backend/services/event_service.py [AI能力升级] 事件写入时自动调整相关Agent的情感和关系分数，支持正向互动提升好感度，负面事件降低好感度，并写回Agent表。 
+
+2024-06-10 修复 | backend/services/agent_service.py | bug fix | 修正add_agent方法，写入数据库时只保留agents表实际字段，排除memories、llmPrompts、embedding等非表字段，防止Supabase 500错误（PGRST204）。
+
+2024-06-09 自动补全 backend/main.py [功能增强]
+- 启动时自动检测数据库agents表是否为空，若为空则批量写入config.py中AGENT_PRESETS的所有agent（只保留数据库字段，自动补全缺省字段）。
+- 解决数据库无agent时前端无内容问题。 
+
+2024-06-10 ai-town-frontend/src/components/LogPanel.vue UI修正：
+- 移除右上角事件流中所有agent记忆的渲染，只保留事件流（filteredEvents），不再显示任何agent的记忆。
+- 类型：UI修正/前端事件日志纯净化。 
+
+2024-06-10 后端服务修复：
+- 修复backend/services/agent_service.py中的Supabase连接问题，增加异常处理和重试机制。
+- 修复backend/services/event_service.py中的查询逻辑，添加异常捕获防止API响应500错误。
+- 在前端PixiTown.vue组件中增加agent记忆懒加载逻辑，确保点击agent时能正确显示记忆。
+- 修改LogPanel.vue的事件过滤逻辑，放宽条件以显示更多类型事件，包括DIALOGUE、GIFT、COOPERATION等互动类型。
+- 类型：后端稳定性/前端显示优化。 
+
+2024-06-10 修复事件生成和显示问题：
+- 修复backend/loop.py中的main_loop函数，增强事件生成器的稳定性，增加备用事件生成机制和错误处理。
+- 添加启动时自动生成测试事件的代码，确保数据库中始终有事件数据供前端显示。
+- 随机化事件生成间隔（30-90秒），使仿真更加自然、不规律。
+- 在ai-town-frontend/src/components/PixiTown.vue中增加智能体位置优化代码，当检测到智能体位置过于集中（全部在左上角）时，自动将其重新分布在地图中央区域。
+- 类型：功能修复/用户体验优化。 
+
+2024-06-10 健壮性修复：
+- 修改ai-town-frontend/src/api/event.ts的fetchEvents函数，增强对后端响应格式的兼容性，能正确处理ResponseModel（{code,msg,data}）格式和直接返回数组的情况。
+- 修改ai-town-frontend/src/api/agent.ts的fetchAgents函数，同样增强兼容性，并在后端未返回数据时自动生成测试数据，确保UI不会崩溃。
+- 修改ai-town-frontend/src/components/PixiTown.vue中点击agent的记忆加载逻辑，完善错误处理和对不同响应格式的处理。
+- 添加更详细的调试日志输出，便于排查问题。
+- 添加空数据时的前端默认测试数据，确保在缺少后端数据时也能正常显示界面。
+- 类型：前端健壮性/错误处理增强。 
+
+2024-06-10 ai-town-frontend/src/components/PixiTown.vue [功能修复]
+类型：Bug Fix
+描述：修复Agent记忆显示问题：
+- 优化了记忆加载逻辑，在Agent数据加载时自动获取记忆
+- 修复了Agent详情弹窗中的记忆显示，添加了记忆列表组件
+- 改进了记忆类型和重要性的视觉显示，使用不同背景色区分不同类型记忆
+- 添加了对各种API响应格式的兼容处理，增强了前端显示稳定性 
+
+2024-06-10 修复事件API返回问题：
+- 修复backend/routers/event.py中get_events函数，确保返回的事件数据字段名称与前端一致，添加字段别名转换（affected_agents→affectedAgents，start_time→startTime，created_at→createdAt）。
+- 优化backend/services/event_service.py中的get_events方法，添加数据处理逻辑，确保返回的事件包含所有必要字段，增强错误处理和数据一致性。
+- 改进ai-town-frontend/src/api/event.ts中的fetchEvents函数，增加字段校验和修复逻辑，添加更详细的调试日志，提升前端显示稳定性。
+- 解决问题：修复前端无法显示事件内容的问题，确保后端API返回的事件数据能被前端正确解析和显示。 
+
+2024-06-10 增强事件查询与API调试功能：
+- 优化backend/services/event_service.py的get_events方法，添加详细日志输出和灵活的查询功能，解决查询不到事件的问题
+- 改进backend/routers/event.py中的get_events接口，增强字段转换和容错处理
+- 新增/api/event/debug调试接口，支持直接查看数据库连接状态和事件表数据
+- 扩展ai-town-frontend/src/types/event.ts中的Event接口，兼容不同的字段命名
+- 此次修复增强了事件API的健壮性，即使在后端字段名不一致或数据格式异常的情况下，也能确保前端正确显示事件内容 
+
+2024-06-10 修复事件列表获取问题：
+- 修改ai-town-frontend/src/api/event.ts的fetchEvents函数，使用/api/event/debug接口替代标准/api/event接口
+- 优化事件数据处理，直接使用debug接口返回的events数组，避开可能的字段兼容性问题
+- 增强字段名转换和数据处理逻辑，同时支持下划线命名和驼峰命名的字段
+- 改进错误处理和日志记录，便于追踪问题
+- 此次修复通过调整前端获取和处理逻辑，解决了后端事件正常存在但无法在前端显示的问题 

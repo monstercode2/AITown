@@ -5,8 +5,9 @@ from backend.state import DASHSCOPE_API_KEY, events
 from openai import OpenAI
 import os
 import json
-from backend.services.memory_service import MemoryService
 from backend.config import LLM_MODELS, EVENT_GENERATOR_PRESET
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 class LLMService:
     def generate_environment_prompt(self, agent: Agent) -> str:
@@ -23,14 +24,70 @@ class LLMService:
                 partners.extend(m.relatedAgents)
         top_partners = [p for p, _ in Counter(partners).most_common(3)]
         rel_str = f"我最近经常和{', '.join(top_partners)}互动。" if top_partners else ''
-        # 3. 记忆回溯（最近3条重要记忆）
+        # 3. 记忆回溯（优先用向量检索，补充最近3条重要记忆）
+        context_text = ''
+        for m in sorted(agent.memories, key=lambda m: -m.timestamp):
+            if m.type == 'DIALOGUE' and m.content and '对你说' in m.content:
+                context_text = m.content
+                break
+        if not context_text and agent.memories:
+            context_text = agent.memories[-1].content
+        vector_memories = []
+        if context_text:
+            try:
+                embedding = self.get_embedding(context_text)
+                from backend.services.memory_service import MemoryService
+                vector_memories = MemoryService().search_memories_by_embedding(embedding, 5)
+            except Exception as e:
+                vector_memories = []
+        vector_mem_str = ''
+        if vector_memories:
+            vector_mem_str = "\n【与当前情境最相关的历史记忆】\n" + "\n".join([f"- {m.content}" for m in vector_memories])
+        # 新增：相关事件推荐
+        event_str = ''
+        if context_text:
+            try:
+                similar_events = self.get_similar_events_by_context(context_text, 3)
+                if similar_events:
+                    event_str = "\n【与当前情境最相关的历史事件】\n" + "\n".join([f"- {e.description}" for e in similar_events])
+            except Exception as e:
+                event_str = ''
+        # 新增：相关Agent推荐
+        agent_str = ''
+        if context_text:
+            try:
+                similar_agents = self.get_similar_agents_by_context(context_text, 3)
+                if similar_agents:
+                    agent_str = "\n【与你最相似的Agent】\n" + "\n".join([f"- {a.name}" for a in similar_agents if a.id != agent.id])
+            except Exception as e:
+                agent_str = ''
+        # 依然保留最近3条重要记忆
         important_memories = sorted(agent.memories, key=lambda m: (-m.importance, -m.timestamp))[:3]
         mem_str = "最近记忆片段：" + "; ".join([m.content for m in important_memories]) if important_memories else ''
         # 4. 目标动机
         goals = getattr(agent, 'goals', None) or getattr(agent, 'goal', None) or '暂无明确目标'
         # 5. 情感状态
-        mood = getattr(agent, 'mood', '普通')
-        # 6. 当前环境
+        mood = getattr(agent, 'emotion', None) or getattr(agent, 'mood', '普通')
+        emotion_str = f"【情感状态】你当前的情感是：{mood}。\n"
+        # 6. 社会关系（与所有可见Agent的关系分数）
+        relationships_str = ""
+        if hasattr(agent, 'relationships') and agent.relationships:
+            rels = []
+            for other_id, score in agent.relationships.items():
+                rels.append(f"与{other_id}的关系分数：{score}")
+            if rels:
+                relationships_str = "【社会关系】" + "; ".join(rels) + "\n"
+        # 7. 历史多轮对话（与最近互动对象的DIALOGUE记忆）
+        dialogue_history = []
+        for m in sorted(agent.memories, key=lambda m: -m.timestamp):
+            if m.type == 'DIALOGUE' and m.content:
+                dialogue_history.append(m.content)
+            if len(dialogue_history) >= 5:
+                break
+        dialogue_history_str = ""
+        if dialogue_history:
+            dialogue_history_str = "【历史对话】\n" + "\n".join(dialogue_history) + "\n"
+        # 8. 当前环境
         visible_agents_str = ''
         for other in filter(lambda a: a.id != agent.id, self.get_all_agents()):
             rel = agent.relationships.get(other.id)
@@ -50,7 +107,6 @@ class LLMService:
             f"当前全局政策：\n{policies_str.strip()}"
         )
         # 8. 自我反思与成长机制
-        # 简单实现：统计最近10条记忆的关键词，生成自我反思
         recent_memories = sorted(agent.memories, key=lambda m: -m.timestamp)[:10]
         all_text = ' '.join([m.content for m in recent_memories])
         import re
@@ -79,12 +135,17 @@ class LLMService:
         # 7. 结构化思考链条prompt拼接
         prompt = (
             dialogue_str +
-            f"【身份自觉】{identity}\n"
-            f"【社会关系】{rel_str}\n"
-            f"【记忆回溯】{mem_str}\n"
-            f"【目标动机】{goals}\n"
-            f"【情感状态】{mood}\n"
-            f"【当前环境】\n{env_str}\n"
+            f"【身份自觉】{identity}\n" +
+            relationships_str +
+            emotion_str +
+            dialogue_history_str +
+            f"【社会关系】{rel_str}\n" +
+            vector_mem_str +
+            event_str +
+            agent_str +
+            f"\n【记忆回溯】{mem_str}\n" +
+            f"【目标动机】{goals}\n" +
+            f"【当前环境】\n{env_str}\n" +
             f"【自我反思】{reflection}\n"
             + ("请针对刚刚收到的消息做出回应，并结合你的身份、记忆和目标给出决策理由。\n" if recent_dialogue else "") +
             "请详细描述你的具体行动计划、预期结果和可能遇到的问题。\n"
@@ -109,6 +170,36 @@ class LLMService:
         return agent.llmPrompts['role']
 
     def generate_agent_reaction(self, agent: Agent, event: Event) -> str:
+        context_text = event.description or ''
+        vector_memories = []
+        if context_text:
+            try:
+                embedding = self.get_embedding(context_text)
+                from backend.services.memory_service import MemoryService
+                vector_memories = MemoryService().search_memories_by_embedding(embedding, 5)
+            except Exception as e:
+                vector_memories = []
+        vector_mem_str = ''
+        if vector_memories:
+            vector_mem_str = "\n【与当前事件最相关的历史记忆】\n" + "\n".join([f"- {m.content}" for m in vector_memories])
+        # 新增：相关事件推荐
+        event_str = ''
+        if context_text:
+            try:
+                similar_events = self.get_similar_events_by_context(context_text, 3)
+                if similar_events:
+                    event_str = "\n【与当前事件最相关的历史事件】\n" + "\n".join([f"- {e.description}" for e in similar_events])
+            except Exception as e:
+                event_str = ''
+        # 新增：相关Agent推荐
+        agent_str = ''
+        if context_text:
+            try:
+                similar_agents = self.get_similar_agents_by_context(context_text, 3)
+                if similar_agents:
+                    agent_str = "\n【与你最相似的Agent】\n" + "\n".join([f"- {a.name}" for a in similar_agents if a.id != agent.id])
+            except Exception as e:
+                agent_str = ''
         memories = agent.memories[-5:]
         mem_str = '\n'.join(f"- {m.content}" for m in memories) or '（无）'
         relationships = ', '.join(f"{k}: 好感度{v.affinity}" for k, v in agent.relationships.items()) or '（无）'
@@ -118,39 +209,67 @@ class LLMService:
         if getattr(agent, 'attributes', None):
             attrs = agent.attributes.dict() if hasattr(agent.attributes, 'dict') else (agent.attributes if isinstance(agent.attributes, dict) else vars(agent.attributes))
             attributes = ', '.join(f"{k}:{v}" for k, v in attrs.items())
-        mood = getattr(agent, 'mood', '普通')
-        # 经济属性
+        mood = getattr(agent, 'emotion', None) or getattr(agent, 'mood', '普通')
         role = getattr(agent, 'role', '未知')
         income = getattr(agent, 'income', '未知')
         sensitivity = getattr(agent, 'sensitivity', {})
-        # 当前政策
         from backend.state import events as global_events
         policies = [e for e in global_events if '政策' in e.description or 'policy' in (e.meta or {})]
         policy_str = '\n'.join(f"- {p.description}" for p in policies[-3:]) if policies else '无'
-        # 事件impact
         impact_str = ''
         if hasattr(event, 'impact') and event.impact:
             impact_str = '\n你受到的影响：' + ', '.join(f"{k}:{v}" for k,v in event.impact.items())
+        # 关系分数（与事件相关Agent）
+        relationships_str = ""
+        if hasattr(agent, 'relationships') and agent.relationships:
+            rels = []
+            if event and event.from_agent and event.from_agent in agent.relationships:
+                rels.append(f"与{event.from_agent}的关系分数：{agent.relationships[event.from_agent]}")
+            if event and event.to_agent and event.to_agent in agent.relationships:
+                rels.append(f"与{event.to_agent}的关系分数：{agent.relationships[event.to_agent]}")
+            if rels:
+                relationships_str = "【与事件相关Agent的关系】" + "; ".join(rels) + "\n"
+        # 历史多轮对话（与事件相关Agent的DIALOGUE记忆）
+        dialogue_history = []
+        for m in sorted(agent.memories, key=lambda m: -m.timestamp):
+            if m.type == 'DIALOGUE' and m.content and (
+                (event and event.from_agent and event.from_agent in (m.relatedAgents or [])) or
+                (event and event.to_agent and event.to_agent in (m.relatedAgents or []))
+            ):
+                dialogue_history.append(m.content)
+            if len(dialogue_history) >= 5:
+                break
+        dialogue_history_str = ""
+        if dialogue_history:
+            dialogue_history_str = "【历史对话】\n" + "\n".join(dialogue_history) + "\n"
+        from backend.services.memory_service import MemoryService
         return (
-            f"你是AI小镇的居民（{agent.name}）。\n"
-            f"职业：{role}\n"
-            f"性格特点：{agent.personality or '平和友善'}\n"
-            f"当前心情：{mood}\n"
-            f"特征：{traits}\n"
-            f"当前需求：{needs}\n"
-            f"当前属性：{attributes}\n"
-            f"收入：{income}\n"
-            f"政策敏感度：{sensitivity}\n"
-            f"你的记忆片段如下：\n{mem_str}\n"
-            f"你与其他人的关系：{relationships}\n"
-            f"你当前状态：{agent.state}，{agent.currentAction or ''}\n"
-            f"当前全局政策：\n{policy_str}\n"
-            f"{impact_str}"
-            f"请针对以下事件做出你的反应（只描述你自己的行动、情绪和经济行为，不要生成事件本身）。\n\n事件内容：\n{event.description}\n"
+            vector_mem_str +
+            event_str +
+            agent_str +
+            emotion_str +
+            relationships_str +
+            dialogue_history_str +
+            f"\n你是AI小镇的居民（{agent.name}）。\n" +
+            f"职业：{role}\n" +
+            f"性格特点：{agent.personality or '平和友善'}\n" +
+            f"当前心情：{mood}\n" +
+            f"特征：{traits}\n" +
+            f"当前需求：{needs}\n" +
+            f"当前属性：{attributes}\n" +
+            f"收入：{income}\n" +
+            f"政策敏感度：{sensitivity}\n" +
+            f"你的记忆片段如下：\n{mem_str}\n" +
+            f"你与其他人的关系：{relationships}\n" +
+            f"你当前状态：{agent.state}，{agent.currentAction or ''}\n" +
+            f"当前全局政策：\n{policy_str}\n" +
+            f"{impact_str}" +
+            f"请针对以下事件做出你的反应（只描述你自己的行动、情绪和经济行为，不要生成事件本身）。\n\n事件内容：\n{event.description}\n" +
             f"如果你的反应会引发新的事件或影响其他agent，请在JSON中用 triggeredEvent 字段详细描述（如通知、协作、经济反馈、请求帮助等）。\n请输出你的反应，格式为JSON。"
         )
 
     def llm_decide(self, agent: Agent, prompt: str, mode: str = 'decision', event: Optional[Event] = None) -> Optional[Memory]:
+        from backend.services.memory_service import MemoryService
         if not DASHSCOPE_API_KEY:
             raise RuntimeError("DASHSCOPE_API_KEY未配置")
         if mode == 'reaction' and event is not None:
@@ -189,6 +308,80 @@ class LLMService:
                         content += delta.content
         else:
             content = completion.choices[0].message.content
+        # 优先解析多步行为链（JSON数组）
+        def parse_llm_action_chain(llm_output: str):
+            try:
+                actions = json.loads(llm_output)
+                if isinstance(actions, list):
+                    return actions
+            except Exception:
+                pass
+            return None
+        actions = parse_llm_action_chain(content)
+        if actions:
+            for act in actions:
+                action_type = act.get('action', '').upper()
+                # MOVE
+                if action_type == 'MOVE' and 'target_position' in act:
+                    x, y = act['target_position']
+                    x = max(0, min(800, int(x)))
+                    y = max(0, min(600, int(y)))
+                    AgentService().update_agent(agent.id, AgentUpdateModel(position={'x': x, 'y': y}))
+                # 互动类
+                elif action_type in ('SPEAK', 'TALK', 'INTERACT', 'GIFT', 'COOPERATE', 'REQUEST_HELP'):
+                    target_name = act.get('target')
+                    item = act.get('item') if action_type == 'GIFT' else None
+                    message = act.get('message', '')
+                    all_agents = self.get_all_agents()
+                    to_agent = next((a for a in all_agents if a.name == target_name or a.id == target_name), None)
+                    if to_agent:
+                        event_type = {
+                            'SPEAK': 'DIALOGUE',
+                            'TALK': 'DIALOGUE',
+                            'INTERACT': 'DIALOGUE',
+                            'GIFT': 'GIFT',
+                            'COOPERATE': 'COOPERATION',
+                            'REQUEST_HELP': 'REQUEST_HELP',
+                        }.get(action_type, 'DIALOGUE')
+                        event = Event(
+                            id=str(int(time.time() * 1000)),
+                            type=event_type,
+                            description=f"{agent.name}对{to_agent.name}执行{action_type}{'，物品：'+item if item else ''}{'，内容：'+message if message else ''}",
+                            affectedAgents=[agent.id, to_agent.id],
+                            startTime=int(time.time() * 1000),
+                            duration=10000,
+                            impact={},
+                            meta={"action": action_type, "from": agent.name, "to": to_agent.name, "item": item, "message": message},
+                            from_agent=agent.id,
+                            to_agent=to_agent.id,
+                            content=message or item or action_type
+                        )
+                        EventService().add_event(event)
+            # 行为链已处理，后续单步解析不再执行
+        else:
+            # 自动解析移动指令并驱动Agent移动
+            import re, json
+            from backend.services.agent_service import AgentService
+            from backend.models import AgentUpdateModel
+            def parse_llm_move_action(llm_output: str):
+                try:
+                    data = json.loads(llm_output)
+                    if data.get('action', '').upper() == 'MOVE' and 'target_position' in data:
+                        x, y = data['target_position']
+                        return int(x), int(y)
+                except Exception:
+                    pass
+                match = re.search(r'ACTION\s*[:：]?\s*MOVE.*?TARGET_POSITION\s*[:：]?\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?', llm_output, re.IGNORECASE | re.DOTALL)
+                if match:
+                    x, y = match.groups()
+                    return int(x), int(y)
+                return None
+            pos = parse_llm_move_action(content)
+            if pos:
+                x, y = pos
+                x = max(0, min(800, x))
+                y = max(0, min(600, y))
+                AgentService().update_agent(agent.id, AgentUpdateModel(position={'x': x, 'y': y}))
         from backend.models import Memory
         # 动态评估重要性
         importance = 2
@@ -219,32 +412,6 @@ class LLMService:
             tags=["llm"]
         )
         MemoryService().add_memory(mem)
-        # 若输出为DIALOGUE，自动为对方生成"待回应"事件
-        import re
-        from backend.services.event_service import EventService
-        pattern = re.compile(r"ACTION:\s*(SPEAK|TALK|INTERACT)[^\n]*\n.*?TARGET:\s*([\u4e00-\u9fa5A-Za-z0-9_\-]+)[^\n]*\n.*?MESSAGE:\s*['\"]?(.+?)['\"]?($|\n)", re.IGNORECASE|re.DOTALL)
-        match = pattern.search(content)
-        if match:
-            action_type = match.group(1).upper()
-            target_name = match.group(2)
-            message = match.group(3).strip()
-            all_agents = self.get_all_agents()
-            to_agent = next((a for a in all_agents if a.name == target_name or a.id == target_name), None)
-            if to_agent and message:
-                event = Event(
-                    id=str(int(time.time() * 1000)),
-                    type="DIALOGUE",
-                    description=f"{agent.name}对{to_agent.name}说: {message}",
-                    affectedAgents=[agent.id, to_agent.id],
-                    startTime=int(time.time() * 1000),
-                    duration=10000,
-                    impact={},
-                    meta={"action": action_type, "from": agent.name, "to": to_agent.name, "message": message, "pending_response": True},
-                    from_agent=agent.id,
-                    to_agent=to_agent.id,
-                    content=message
-                )
-                EventService().add_event(event)
         # 行动结果反馈：若LLM输出有"结果"字段则写入，否则用默认模板
         result_match = re.search(r'结果[：:]\s*([\u4e00-\u9fa5A-Za-z0-9_\-，。,.！!\s]+)', content)
         result_text = result_match.group(1).strip() if result_match else None
@@ -276,6 +443,7 @@ class LLMService:
         return mem
 
     def generate_event_via_llm(self, context: dict) -> dict:
+        import logging
         # context拼接包含所有agent状态、经济总览、政策历史
         from backend.state import agents, events as global_events
         agents_summary = '\n'.join([
@@ -309,30 +477,70 @@ class LLMService:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, 'content') and delta.content:
                     content += delta.content
+        print(f"[LLM事件生成] 原始返回: {content}")
         # 尝试解析 LLM 返回的 JSON
         try:
             event_obj = json.loads(content)
-        except Exception:
+            print(f"[LLM事件生成] 解析后: {event_obj}")
+        except Exception as e:
+            print(f"[LLM事件生成] JSON解析失败: {e}, 使用原始文本")
             event_obj = {"description": content}
-        # 自动写入 Supabase events 表
+        # 强制校验 affectedAgents 字段
+        affected_agents = event_obj.get('affectedAgents', event_obj.get('affected_agents', []))
+        if not isinstance(affected_agents, list) or not all(isinstance(a, str) for a in affected_agents):
+            print(f"[LLM事件生成] affectedAgents 字段类型异常: {affected_agents}")
+            affected_agents = []
         from backend.models import Event
         import time as _time
-        affected_agents = event_obj.get('affectedAgents', event_obj.get('affected_agents', []))
-        if not affected_agents:
-            affected_agents = []
-        start_time = event_obj.get('start_time') or event_obj.get('startTime') or int(_time.time() * 1000)
         event = Event(
-            id=event_obj.get('id', str(int(_time.time() * 1000))),
+            id=str(int(_time.time() * 1000)),  # 强制唯一ID，避免主键冲突
             type=event_obj.get('type', 'LLM'),
             description=event_obj.get('description', ''),
             affectedAgents=affected_agents,
-            startTime=start_time,
+            startTime=event_obj.get('startTime', event_obj.get('start_time', int(_time.time() * 1000))),
             duration=event_obj.get('duration', 300000),
             impact=event_obj.get('impact', {}),
-            meta=event_obj,
+            meta=event_obj.get('meta', {}),
             scope=event_obj.get('scope'),
             position=event_obj.get('position'),
+            from_agent=event_obj.get('from_agent'),
+            to_agent=event_obj.get('to_agent'),
+            content=event_obj.get('content')
         )
+        print(f"[LLM事件生成] 写入数据库前事件对象: {event}")
         from backend.services.supabase_client import supabase
-        supabase.table("events").insert(event.dict(by_alias=True, exclude_none=True)).execute()
-        return event.dict() 
+        try:
+            res = supabase.table("events").insert(event.dict(by_alias=True, exclude_none=True)).execute()
+            print(f"[LLM事件生成] 数据库写入结果: {res}")
+        except Exception as e:
+            print(f"[LLM事件生成] 写入数据库失败: {e}")
+        return event.dict()
+
+    def get_embedding(self, text: str) -> list:
+        """
+        调用阿里百炼 DashScope embedding API 生成文本向量，并自动补齐/截断为1536维。
+        """
+        if not DASHSCOPE_API_KEY:
+            raise RuntimeError("DASHSCOPE_API_KEY 未配置")
+        client = OpenAI(
+            api_key=DASHSCOPE_API_KEY,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        resp = client.embeddings.create(input=[text], model="text-embedding-v3")
+        emb = resp.data[0].embedding
+        # 自动补齐/截断为1536维
+        if len(emb) < 1536:
+            emb = emb + [0.0] * (1536 - len(emb))
+        elif len(emb) > 1536:
+            emb = emb[:1536]
+        return emb
+
+    def get_similar_events_by_context(self, context_text: str, top_k: int = 5):
+        from backend.services.event_service import EventService
+        embedding = self.get_embedding(context_text)
+        return EventService().search_events_by_embedding(embedding, top_k)
+
+    def get_similar_agents_by_context(self, context_text: str, top_k: int = 5):
+        from backend.services.agent_service import AgentService
+        embedding = self.get_embedding(context_text)
+        return AgentService().search_agents_by_embedding(embedding, top_k) 

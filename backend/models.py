@@ -23,6 +23,7 @@ class Memory(BaseModel):
     relatedAgents: Optional[List[str]] = None
     location: Optional[str] = None
     tags: Optional[List[str]] = None
+    embedding: Optional[List[float]] = None
 
 class Agent(BaseModel):
     id: str
@@ -39,6 +40,9 @@ class Agent(BaseModel):
     memories: List[Memory] = Field(default_factory=list)
     relationships: Dict[str, Relationship] = Field(default_factory=dict)
     llmPrompts: Optional[dict] = None
+    embedding: Optional[List[float]] = None
+    emotion: Optional[str] = "平静"
+    relationships: Optional[Dict[str, float]] = {}
 
 class Event(BaseModel):
     id: str
@@ -54,6 +58,7 @@ class Event(BaseModel):
     from_agent: Optional[str] = None
     to_agent: Optional[str] = None
     content: Optional[str] = None
+    embedding: Optional[List[float]] = None
 
 class ResponseModel(BaseModel):
     code: int = 0

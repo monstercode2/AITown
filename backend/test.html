@@ -44,6 +44,7 @@
     <button onclick="controlSimulation('reset')">重置Simulation</button>
     <button onclick="connectWS()">连接WebSocket</button>
     <button onclick="generateEvent()">生成事件</button>
+    <button onclick="generateEventStrict()">严格生成事件（字段校验）</button>
     <button onclick="showAllMemories()">所有Agent记忆</button>
     <button onclick="agentReactToEvent()">Agent对事件反应</button>
   </div>
@@ -125,6 +126,71 @@
         api('/api/event/llm_generate', 'POST', context).then(r => {
           show(r);
           refreshEventList();
+        });
+      });
+    }
+
+    // 新增：严格生成事件并校验字段
+    function generateEventStrict() {
+      // 自动采集当前环境和agent状态
+      Promise.all([
+        api('/api/agent'),
+        api('/api/simulation')
+      ]).then(([agentRes, simRes]) => {
+        const agents = (agentRes.data || []).map(a => ({
+          id: a.id,
+          name: a.name,
+          position: a.position,
+          currentAction: a.currentAction,
+          state: a.state
+        }));
+        // 简单时间信息
+        const now = new Date();
+        const context = {
+          time: now.getHours() < 6 ? '凌晨' : now.getHours() < 12 ? '上午' : now.getHours() < 18 ? '下午' : '晚上',
+          day: now.getDate(),
+          hour: now.getHours(),
+          agents
+        };
+        api('/api/event/llm_generate', 'POST', context).then(r => {
+          show(r);
+          // 字段校验
+          const required = [
+            'id','type','description','affectedAgents','startTime','duration','impact','meta','scope','position','from_agent','to_agent','content'
+          ];
+          let html = '<b>字段校验：</b><br/>';
+          let ok = true;
+          const event = r.data || r;
+          required.forEach(f => {
+            if (!(f in event)) {
+              html += `<span style='color:#c00'>缺失字段: ${f}</span><br/>`;
+              ok = false;
+            } else {
+              // 类型校验
+              if (f === 'affectedAgents' && !Array.isArray(event[f])) {
+                html += `<span style='color:#c00'>字段${f}类型错误，应为数组</span><br/>`;
+                ok = false;
+              } else if (f === 'impact' && typeof event[f] !== 'object') {
+                html += `<span style='color:#c00'>字段${f}类型错误，应为对象</span><br/>`;
+                ok = false;
+              } else if (f === 'meta' && typeof event[f] !== 'object') {
+                html += `<span style='color:#c00'>字段${f}类型错误，应为对象</span><br/>`;
+                ok = false;
+              } else if (f === 'startTime' && typeof event[f] !== 'number') {
+                html += `<span style='color:#c00'>字段${f}类型错误，应为整数</span><br/>`;
+                ok = false;
+              } else if (f === 'duration' && typeof event[f] !== 'number') {
+                html += `<span style='color:#c00'>字段${f}类型错误，应为整数</span><br/>`;
+                ok = false;
+              } else {
+                html += `<span style='color:#0a0'>字段${f} ✔</span><br/>`;
+              }
+            }
+          });
+          if (ok) {
+            html = '<b style="color:#0a0">所有字段和类型均正确！</b><br/>' + html;
+          }
+          document.getElementById('output').innerHTML = html + '<hr>' + JSON.stringify(event, null, 2);
         });
       });
     }

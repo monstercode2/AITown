@@ -182,7 +182,27 @@ EVENT_GENERATOR_PRESET = {
     'avatar': '🏛️',
     'llmModel': 'qwq-plus',
     'llmPrompts': {
-        'event_system': "你是AI小镇的镇长Titan，负责制定和发布小镇政策、生成日常事件。你能感知全地图状态、经济状况、居民分布、政策历史。请根据当前小镇的经济、居民状态、历史政策，生成一个合适的日常事件或新政策。事件需包含：事件名称、描述、触发条件、影响对象、经济影响、政策影响、发生时间、持续时间等。请结合设定，避免灾难性事件，突出经济链式反馈和政策影响。请只输出事件或政策本身的详细信息，格式为JSON。",
+        'event_system': (
+            "你是AI小镇的镇长Titan，负责制定和发布小镇政策、生成日常事件。你能感知全地图状态、经济状况、居民分布、政策历史。"
+            "请根据当前小镇的经济、居民状态、历史政策，生成一个合适的日常事件或新政策。"
+            "事件必须严格输出如下JSON格式，字段名、类型、结构必须与下方完全一致，不得缺失，不得多余，不得更名：\n"
+            "{\n"
+            "  \"id\": \"事件唯一ID（字符串，建议用当前时间戳字符串）\",\n"
+            "  \"type\": \"事件类型（如POLICY、DIALOGUE、GIFT等，字符串）\",\n"
+            "  \"description\": \"事件描述（字符串）\",\n"
+            "  \"affectedAgents\": [\"1\", \"2\"],  // 受影响的agent id数组，必须为字符串数组\n"
+            "  \"startTime\": 1718000000000,    // 毫秒时间戳，整数\n"
+            "  \"duration\": 300000,            // 持续时间，单位毫秒，整数\n"
+            "  \"impact\": {\"mood\": 10},        // 影响（对象，可为空）\n"
+            "  \"meta\": {},                 // 其他元信息（对象，可为空）\n"
+            "  \"scope\": \"global\",             // 作用范围（字符串，可为空）\n"
+            "  \"position\": {\"x\": 1, \"y\": 2},  // 发生位置（对象，可为空）\n"
+            "  \"from_agent\": \"1\",             // 发起者id（字符串，可为空）\n"
+            "  \"to_agent\": \"2\",               // 接收者id（字符串，可为空）\n"
+            "  \"content\": \"对话内容\"           // 事件内容（字符串，可为空）\n"
+            "}\n"
+            "所有字段都必须有，类型必须严格一致。不要输出任何解释、注释或多余内容，只输出JSON。"
+        ),
         'event_decision': "当前小镇全局信息：\n{context}\n"
     }
 }
@@ -209,4 +229,6 @@ for agent in AGENT_PRESETS:
     else:
         for key in ['system', 'role', 'decision']:
             if key not in agent['llmPrompts']:
-                agent['llmPrompts'][key] = _default_llm_prompts(agent)[key] 
+                agent['llmPrompts'][key] = _default_llm_prompts(agent)[key]
+    if 'decision' in agent['llmPrompts']:
+        agent['llmPrompts']['decision'] += "\n你只能在地图范围内移动，x坐标范围为0~800，y坐标范围为0~600，超出范围无效。\n请将你的所有行动计划以JSON数组格式输出，每个元素为一个action对象。例如：\n[\n  {\"action\": \"MOVE\", \"target_position\": [100, 200]},\n  {\"action\": \"SPEAK\", \"target\": \"王伟\", \"message\": \"你好！\"}\n]\n支持的action类型有：MOVE、SPEAK、GIFT、COOPERATE、REQUEST_HELP等。每个action对象需包含必要字段（如target、message、item等），未使用的字段可省略。" 

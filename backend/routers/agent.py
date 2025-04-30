@@ -28,4 +28,16 @@ def update_agent(agent_id: str, updates: AgentUpdateModel = Body(...), service: 
 @router.delete("/api/agent/{agent_id}")
 def delete_agent(agent_id: str, service: AgentService = Depends(get_agent_service)):
     success = service.delete_agent(agent_id)
-    return ResponseModel(data={"success": success, "message": f"Agent已删除: {agent_id}"}) 
+    return ResponseModel(data={"success": success, "message": f"Agent已删除: {agent_id}"})
+
+@router.post("/api/agent/search_by_vector")
+def search_agents_by_vector(
+    query: dict,  # {"embedding": [...], "top_k": 5}
+    service: AgentService = Depends(get_agent_service)
+):
+    embedding = query.get("embedding")
+    top_k = query.get("top_k", 5)
+    if not embedding or not isinstance(embedding, list):
+        raise HTTPException(status_code=400, detail="embedding字段缺失或格式错误")
+    agents = service.search_agents_by_embedding(embedding, top_k)
+    return ResponseModel(data=[a.dict() for a in agents]) 

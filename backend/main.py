@@ -20,6 +20,7 @@ from backend.loop import main_loop
 from backend.config_manager import ConfigManager
 from backend.services.llm_service import LLMService
 from backend.routers.memory import router as memory_router
+from backend.services.supabase_client import supabase
 
 app = FastAPI()
 
@@ -154,32 +155,6 @@ def update_simulation_settings(settings: SimulationSettings = Body(...)):
     # TODO: 更新设置逻辑
     return ResponseModel(data={"settings": settings.dict()})
 
-# ========== Agent 增删改查 ========== #
-@app.get("/api/agent")
-def get_agents():
-    return ResponseModel(data=[a.dict() for a in agents])
-
-@app.post("/api/agent")
-def add_agent(agent: Agent):
-    agents.append(agent)
-    return ResponseModel(data=agent.dict())
-
-@app.put("/api/agent/{agent_id}")
-def update_agent(agent_id: str, updates: AgentUpdateModel = Body(...)):
-    for a in agents:
-        if a.id == agent_id:
-            update_data = updates.dict(exclude_unset=True)
-            for k, v in update_data.items():
-                setattr(a, k, v)
-            return ResponseModel(data=a.dict())
-    raise HTTPException(status_code=404, detail="Agent不存在")
-
-@app.delete("/api/agent/{agent_id}")
-def delete_agent(agent_id: str):
-    global agents
-    agents = [a for a in agents if a.id != agent_id]
-    return ResponseModel(data={"success": True, "message": f"Agent已删除: {agent_id}"})
-
 # ========== Event 增删查 ========== #
 @app.get("/api/event")
 def get_events(type: Optional[str] = None, limit: Optional[int] = None, offset: int = 0):
@@ -230,11 +205,35 @@ def reload_config():
     agents.extend([Agent(**a) for a in ConfigManager.get_agent_presets()])
     return {"status": "reloaded"}
 
-# 你可以继续扩展 POST/PUT/DELETE 等接口，实现完整的业务逻辑
+def init_default_agents():
+    res = supabase.table("agents").select("id").execute()
+    if not res.data:  # 表为空
+        presets = ConfigManager.get_agent_presets()
+        db_fields = {"id", "name", "position", "state", "avatar", "personality", "traits", "attributes", "emotion", "relationships"}
+        agents_to_insert = []
+        for a in presets:
+            agent_data = {k: v for k, v in a.items() if k in db_fields}
+            # 补全缺省字段
+            for f in db_fields:
+                if f not in agent_data:
+                    if f in ["traits", "relationships"]:
+                        agent_data[f] = [] if f == "traits" else {}
+                    elif f == "attributes":
+                        agent_data[f] = {"energy": 100, "mood": 50, "sociability": 50}
+                    else:
+                        agent_data[f] = ""
+            agents_to_insert.append(agent_data)
+        if agents_to_insert:
+            supabase.table("agents").insert(agents_to_insert).execute()
+
+# 注册数据库持久化API路由
 app.include_router(agent_router)
 app.include_router(event_router)
 app.include_router(simulation_router)
 app.include_router(llm_router)
 app.include_router(log_router)
 app.include_router(websocket_router)
-app.include_router(memory_router) 
+app.include_router(memory_router)
+
+# FastAPI app初始化后调用
+init_default_agents() 
